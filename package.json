@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "opencode-secrets-env",
+  "version": "0.1.0",
+  "description": "OpenCode plugin that injects secrets from ~/.config/opencode/secrets.env into process.env at startup, so MCP servers and other plugins can reference them with {env:...}",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "files": [
+    "index.ts",
+    "env.ts"
+  ],
+  "scripts": {
+    "test": "node --test test/env.test.ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm test"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "secrets",
+    "env",
+    "environment-variables",
+    "dotenv",
+    "mcp"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bytesnail/opencode-secrets-env.git"
+  },
+  "dependencies": {
+    "@opencode/plugin": "^2.0.0",
+    "dotenv": "^18.0.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0"
+  }
+}
