@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import plugin from "../index.ts"
@@ -87,6 +87,104 @@ test("server() hot-reloads edits and withdrawals when the file changes", async (
     await hooks.dispose()
   })
 })
+
+test("server() picks up a secrets file created after startup", async () => {
+  await withTempDir(async (dir) => {
+    const file = join(dir, "secrets.env")
+    const hooks = await plugin.server({ directory: dir }, { path: file, quiet: true })
+    assert.equal(process.env[KEY], undefined)
+
+    writeFileSync(file, `${KEY}=late\n`, { mode: 0o600 })
+    await waitFor(() => process.env[KEY] === "late")
+
+    await hooks.dispose()
+    assert.equal(process.env[KEY], undefined)
+  })
+})
+
+test("server() picks up the secrets file when its directory is created after startup", async () => {
+  await withTempDir(async (dir) => {
+    const file = join(dir, "nested", "deeper", "secrets.env")
+    const hooks = await plugin.server({ directory: dir }, { path: file, quiet: true })
+    assert.equal(process.env[KEY], undefined)
+
+    mkdirSync(join(dir, "nested", "deeper"), { recursive: true })
+    writeFileSync(file, `${KEY}=nested\n`, { mode: 0o600 })
+    await waitFor(() => process.env[KEY] === "nested")
+
+    await hooks.dispose()
+    assert.equal(process.env[KEY], undefined)
+  })
+})
+
+test("server() shares one store across instances of the same file until the last dispose", async () => {
+  await withTempDir(async (dir) => {
+    const file = join(dir, "secrets.env")
+    writeFileSync(file, `${KEY}=shared\n`, { mode: 0o600 })
+
+    const first = await plugin.server({ directory: dir }, { path: file, watch: false, quiet: true })
+    const second = await plugin.server({ directory: dir }, { path: file, watch: false, quiet: true })
+    assert.equal(process.env[KEY], "shared")
+
+    // The first dispose must not withdraw keys the second instance still uses.
+    await first.dispose()
+    assert.equal(process.env[KEY], "shared")
+
+    await second.dispose()
+    assert.equal(process.env[KEY], undefined)
+  })
+})
+
+test("server() dispose is idempotent", async () => {
+  await withTempDir(async (dir) => {
+    const file = join(dir, "secrets.env")
+    writeFileSync(file, `${KEY}=x\n`, { mode: 0o600 })
+
+    const hooks = await plugin.server({ directory: dir }, { path: file, watch: false, quiet: true })
+    assert.equal(process.env[KEY], "x")
+    await hooks.dispose()
+    await hooks.dispose()
+    assert.equal(process.env[KEY], undefined)
+  })
+})
+
+test("server() reports 'up to date' when a reload changes nothing", async () => {
+  await withTempDir(async (dir) => {
+    const previousXdg = process.env.XDG_DATA_HOME
+    process.env.XDG_DATA_HOME = join(dir, "data")
+    try {
+      const log = join(dir, "data", "opencode", "log", "opencode-secrets-env.log")
+      const file = join(dir, "secrets.env")
+      writeFileSync(file, `${KEY}=one\n`, { mode: 0o600 })
+      const hooks = await plugin.server({ directory: dir }, { path: file })
+      await waitFor(() => readLog(log).includes("startup: 1 injected"))
+
+      // Rewriting identical content must not be misreported as an empty file.
+      writeFileSync(file, `${KEY}=one\n`, { mode: 0o600 })
+      await waitFor(() => readLog(log).includes("reload: up to date (1 entry)"))
+      assert.ok(!readLog(log).includes("no entries"))
+
+      // Once the file really has no entries, the message says so again.
+      writeFileSync(file, "# empty\n", { mode: 0o600 })
+      await waitFor(() => readLog(log).includes("reload: 1 withdrawn"))
+      writeFileSync(file, "# still empty\n", { mode: 0o600 })
+      await waitFor(() => readLog(log).includes("reload: no entries in"))
+
+      await hooks.dispose()
+    } finally {
+      if (previousXdg === undefined) delete process.env.XDG_DATA_HOME
+      else process.env.XDG_DATA_HOME = previousXdg
+    }
+  })
+})
+
+function readLog(file: string): string {
+  try {
+    return readFileSync(file, "utf8")
+  } catch {
+    return ""
+  }
+}
 
 async function waitFor(condition: () => boolean, timeoutMs = 5000): Promise<void> {
   const start = Date.now()

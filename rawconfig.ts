@@ -17,6 +17,8 @@ export interface EnvReference {
 export type ServerReferences = Map<string, EnvReference[]>
 
 const ENV_REF = /\{env:([^{}]+)\}/g
+/** Non-global twin of ENV_REF for one-shot tests (a global regex would keep lastIndex state). */
+const ENV_REF_ONCE = /\{env:[^{}]+\}/
 
 /**
  * Substitute {env:NAME} tokens with current environment values, mirroring
@@ -26,9 +28,12 @@ export function substitute(template: string, env: Record<string, string | undefi
   return template.replace(ENV_REF, (_match, name: string) => env[name] ?? "")
 }
 
-/** True when the value contains at least one {env:...} reference. */
+/**
+ * True when the value contains at least one {env:NAME} reference. Uses the
+ * same pattern as substitution, so an empty name ("{env:}") does not count.
+ */
 export function hasEnvRef(value: string): boolean {
-  return value.includes("{env:")
+  return ENV_REF_ONCE.test(value)
 }
 
 /** Variable names referenced by {env:NAME} tokens in a template. */

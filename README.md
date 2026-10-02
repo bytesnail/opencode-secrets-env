@@ -134,6 +134,11 @@ within about a second — no `opencode service restart` needed:
 - **Deleted keys** are withdrawn from `process.env` (with `override`, the
   original shell value is restored).
 
+The file does not have to exist at startup: the plugin watches the nearest
+existing parent directory and starts applying entries as soon as the file
+(and its directory) appears — handy when you install the plugin first and
+create `secrets.env` afterwards.
+
 MCP servers are long-lived processes that received their environment at
 spawn, so after a hot reload the plugin reconnects the affected ones
 (`mcpReconnect`). With the default `true`, "affected" is computed
@@ -204,7 +209,9 @@ The package is published as TypeScript source (OpenCode loads plugins
 directly), so there is no build step. The plugin entry point is `index.ts` at
 the package root; `env.ts` holds the pure loading logic and `rawconfig.ts`
 the raw-config scanning. Everything is unit tested with `node --test`,
-including an end-to-end pass through the V1 entry point.
+including an end-to-end pass through the V1 entry point and a V2 pass
+through `setup()` with a fake MCP domain covering env-ref substitution and
+precise reconnection.
 
 To load a local checkout while developing, reference the directory:
 
@@ -298,6 +305,10 @@ opencode service restart
   环境里的同名变量永不被触碰（除非开启 `override`）；
 - **删除**的 key 会从 `process.env` 撤回（`override` 模式下恢复 shell
   原值）。
+
+密钥文件无需在启动时就存在：插件会监听最近一层已存在的父目录，当文件
+（及其所在目录）创建后立即开始生效 —— 适合先装插件、后建
+`secrets.env` 的场景。
 
 MCP 服务器是长生命周期子进程，环境变量在启动时确定，因此热更新后插件
 会**按需重连**受影响的服务器（`mcpReconnect`）。默认 `true` 为精确

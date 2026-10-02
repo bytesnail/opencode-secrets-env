@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, watch, type FSWatcher } from "node:fs"
+import { appendFileSync, existsSync, mkdirSync, watch, type FSWatcher } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 import { Plugin } from "@opencode/plugin"
@@ -145,15 +145,24 @@ function sleep(ms: number): Promise<void> {
 // Loading & reporting
 // ---------------------------------------------------------------------------
 
-function report(emit: Emit, file: string, result: ReturnType<SecretsStore["apply"]>, context: string): void {
+function entryCount(n: number): string {
+  return `${n} ${n === 1 ? "entry" : "entries"}`
+}
+
+function report(emit: Emit, file: string, result: ReturnType<SecretsStore["apply"]>, context: string, total: number): void {
   const { added, updated, removed, kept } = result
   const changed = added.length + updated.length + removed.length
-  if (changed === 0 && kept.length === 0) {
-    emit("info", `${context}: no entries in ${file}`)
-    return
-  }
   if (changed === 0) {
-    emit("info", `${context}: nothing to change (${kept.length} entr(y/ies) provided by the real environment)`)
+    // `total` distinguishes "the file is empty" from "every entry was
+    // already in place" — both produce an empty diff, and the latter must
+    // not be misreported as a file without entries.
+    if (total === 0) {
+      emit("info", `${context}: no entries in ${file}`)
+    } else {
+      const keptNote = kept.length > 0 ? `, ${kept.length} provided by the real environment` : ""
+      emit("info", `${context}: up to date (${entryCount(total)}${keptNote})`)
+    }
+    if (kept.length > 0) emit("debug", `kept from real environment: ${kept.join(", ")}`)
     return
   }
   const parts: string[] = []
@@ -188,7 +197,7 @@ function loadOnce(instance: Instance, context: string): ReturnType<SecretsStore[
     if (result.added.length + result.updated.length + result.removed.length === 0) {
       emit("info", `${context}: no secrets file at ${file}, skipping`)
     } else {
-      report(emit, file, result, context)
+      report(emit, file, result, context, 0)
     }
     return result
   }
@@ -197,7 +206,7 @@ function loadOnce(instance: Instance, context: string): ReturnType<SecretsStore[
   }
 
   const result = state.store.apply(read.parsed, options)
-  report(emit, file, result, context)
+  report(emit, file, result, context, Object.keys(read.parsed).length)
   checkRequired(instance)
   return result
 }
@@ -284,6 +293,29 @@ async function reload(file: string): Promise<void> {
   }
 }
 
+/**
+ * The deepest ancestor of `directory` that currently exists. `directory`
+ * itself may not exist yet on first run (e.g. ~/.config/opencode is created
+ * only when the user writes their first secrets file).
+ */
+function deepestExisting(directory: string): string {
+  let current = directory
+  while (!existsSync(current)) {
+    const parent = dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+  return current
+}
+
+function scheduleReload(state: FileState, file: string): void {
+  if (state.timer) clearTimeout(state.timer)
+  state.timer = setTimeout(() => {
+    state.timer = undefined
+    void reload(file)
+  }, 300)
+}
+
 function ensureWatcher(instance: Instance): void {
   if (!instance.options.watch) return
   const state = stateFor(instance.file)
@@ -291,31 +323,55 @@ function ensureWatcher(instance: Instance): void {
 
   const directory = dirname(instance.file)
   const target = basename(instance.file)
+  // When the parent directory does not exist yet, watch the deepest
+  // ancestor that does and move the watch down as the path appears — so a
+  // secrets file created after startup is still picked up live.
+  const watchDir = deepestExisting(directory)
   try {
     // Watch the parent directory rather than the file itself: editors that
     // save atomically (write temp + rename) replace the inode, which would
     // silently end a file-level watch.
-    state.watcher = watch(directory, { persistent: false }, (_event, filename) => {
-      if (filename !== target) return
+    const watcher = watch(watchDir, { persistent: false }, (_event, filename) => {
       const current = stateFor(instance.file)
-      if (current.timer) clearTimeout(current.timer)
-      current.timer = setTimeout(() => {
-        current.timer = undefined
-        void reload(instance.file)
-      }, 300)
+      if (watchDir !== directory) {
+        // Ancestor mode: react only when the watch can move closer to the
+        // real parent. Events fire per directory level, so multi-level
+        // creation (mkdir -p) deepens the watch one level per event.
+        const deepest = deepestExisting(directory)
+        if (deepest === watchDir) return
+        try {
+          watcher.close()
+        } catch {
+          // Best effort only.
+        }
+        if (state.watcher === watcher) state.watcher = undefined
+        ensureWatcher(instance)
+        // The file may have been created together with its directory.
+        if (deepest === directory) scheduleReload(current, instance.file)
+        return
+      }
+      if (filename !== target) return
+      scheduleReload(current, instance.file)
     })
-    state.watcher.on("error", () => {
+    state.watcher = watcher
+    watcher.on("error", () => {
       try {
-        state.watcher?.close()
+        watcher.close()
       } catch {
         // Best effort only; the watcher is already broken.
       }
+      // A stale error from a watcher that was already replaced by a re-arm
+      // must neither clobber the replacement nor warn about a live watch.
+      if (state.watcher !== watcher) return
       state.watcher = undefined
       instance.emit("warn", `file watcher for ${instance.file} stopped; restart the service to apply future edits`)
     })
-    instance.emit("debug", `watching ${instance.file} for changes`)
+    instance.emit(
+      "debug",
+      watchDir === directory ? `watching ${instance.file} for changes` : `watching ${watchDir} until ${directory} exists`,
+    )
   } catch {
-    instance.emit("debug", `cannot watch ${directory}; edits to ${instance.file} need a service restart`)
+    instance.emit("debug", `cannot watch ${watchDir}; edits to ${instance.file} need a service restart`)
   }
 }
 
@@ -378,12 +434,17 @@ function activate(options: NormalizedOptions, directory: string, mcp?: McpLike):
   const instance: Instance = { file, options, mcp, emit, scanRefs: makeRefScanner(directory) }
 
   stateFor(file).instances.add(instance)
-  loadOnce(instance, "startup")
+  // Watch before the initial load so an edit landing between the two is not
+  // missed (the debounced reload picks it up).
   ensureWatcher(instance)
+  loadOnce(instance, "startup")
 
   const envRefTransform = registerEnvRefTransform(instance)
 
+  let disposed = false
   return () => {
+    if (disposed) return
+    disposed = true
     void envRefTransform.then((registration) => registration?.dispose()).catch(() => {})
     const state = files.get(file)
     state?.instances.delete(instance)

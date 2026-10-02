@@ -90,6 +90,11 @@ test("hasEnvRef detects references", () => {
   assert.equal(hasEnvRef("plain"), false)
 })
 
+test("hasEnvRef ignores empty reference names, matching substitute()", () => {
+  assert.equal(hasEnvRef("{env:}"), false)
+  assert.equal(substitute("{env:}", { A: "1" }), "{env:}")
+})
+
 test("setAtPath writes nested values along existing string slots", () => {
   const server = {
     type: "local",
@@ -153,6 +158,17 @@ test("scanServerEnvRefs prefers the higher precedence definition", () => {
 
 test("scanServerEnvRefs returns an empty map when nothing references env", () => {
   withTempDir((dir) => {
+    const refs = scanServerEnvRefs(dir, { xdgConfigHome: join(dir, "xdg"), home: join(dir, "home") })
+    assert.equal(refs.size, 0)
+  })
+})
+
+test("scanServerEnvRefs does not record phantom references with empty names", () => {
+  withTempDir((dir) => {
+    writeFileSync(
+      join(dir, "opencode.jsonc"),
+      `{ "mcp": { "servers": { "s": { "type": "local", "command": ["run", "{env:}"] } } } }`,
+    )
     const refs = scanServerEnvRefs(dir, { xdgConfigHome: join(dir, "xdg"), home: join(dir, "home") })
     assert.equal(refs.size, 0)
   })
