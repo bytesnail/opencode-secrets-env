@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 
@@ -29,6 +29,15 @@ export function substitute(template: string, env: Record<string, string | undefi
 /** True when the value contains at least one {env:...} reference. */
 export function hasEnvRef(value: string): boolean {
   return value.includes("{env:")
+}
+
+/** Variable names referenced by {env:NAME} tokens in a template. */
+export function templateNames(template: string): string[] {
+  const names: string[] = []
+  for (const match of template.matchAll(ENV_REF)) {
+    if (match[1]) names.push(match[1])
+  }
+  return names
 }
 
 /**
@@ -191,4 +200,74 @@ export function scanServerEnvRefs(locationDirectory: string, input: { xdgConfigH
     if (config !== undefined) refsFromConfig(config, refs)
   }
   return refs
+}
+
+/**
+ * Memoizing wrapper around {@link scanServerEnvRefs}: re-reads the config
+ * files only when one of them changed (by path/size/mtime), so it is cheap
+ * enough to call inside transform callbacks and reload handlers.
+ */
+export function makeRefScanner(locationDirectory: string, input: { xdgConfigHome?: string; home?: string } = {}): () => ServerReferences {
+  let cached: ServerReferences | undefined
+  let signature = ""
+  return () => {
+    let current = ""
+    for (const file of configCandidates(locationDirectory, input)) {
+      try {
+        const stat = statSync(file)
+        current += `${file}:${stat.size}:${stat.mtimeMs};`
+      } catch {
+        // Missing candidate: contributes nothing to the signature.
+      }
+    }
+    if (cached === undefined || current !== signature) {
+      cached = scanServerEnvRefs(locationDirectory, input)
+      signature = current
+    }
+    return cached
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Reconnect targeting
+// ---------------------------------------------------------------------------
+
+export type McpReconnectOption = boolean | "all" | readonly string[]
+
+export interface McpServerState {
+  name: string
+  disabled: boolean
+}
+
+/**
+ * Decide which MCP servers must be reconnected after a hot reload.
+ *
+ * - `false`           -> none
+ * - `"all"`           -> every enabled server (covers servers that read the
+ *   inherited environment without explicit {env:...} references)
+ * - `["a", "b"]`      -> exactly those servers, when enabled
+ * - `true` (default)  -> precise: only enabled servers whose raw config
+ *   references at least one of the changed variables
+ */
+export function selectReconnectTargets(
+  servers: readonly McpServerState[],
+  refs: ServerReferences,
+  changedKeys: ReadonlySet<string>,
+  option: McpReconnectOption,
+): string[] {
+  if (option === false) return []
+  const enabled = servers.filter((server) => !server.disabled)
+  if (option === "all") return enabled.map((server) => server.name)
+  if (Array.isArray(option)) {
+    const allowlist = new Set(option)
+    return enabled.filter((server) => allowlist.has(server.name)).map((server) => server.name)
+  }
+  const targets: string[] = []
+  for (const server of enabled) {
+    const serverRefs = refs.get(server.name)
+    if (!serverRefs) continue
+    const referenced = serverRefs.some((ref) => templateNames(ref.template).some((name) => changedKeys.has(name)))
+    if (referenced) targets.push(server.name)
+  }
+  return targets
 }

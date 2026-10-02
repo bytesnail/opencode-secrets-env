@@ -8,9 +8,12 @@ import {
   hasEnvRef,
   parseJsonc,
   scanServerEnvRefs,
+  selectReconnectTargets,
   setAtPath,
   stripJsonc,
   substitute,
+  templateNames,
+  type ServerReferences,
 } from "../rawconfig.ts"
 
 function withTempDir(run: (dir: string) => void): void {
@@ -135,4 +138,42 @@ test("configCandidates orders .opencode before direct configs and ends with glob
   assert.ok(text.indexOf(join("/", "a", "b", ".opencode", "opencode.jsonc")) < text.indexOf(join("/", ".opencode", "opencode.jsonc")))
   assert.ok(text.indexOf(join("/", ".opencode", "opencode.jsonc")) < text.indexOf(join("/", "a", "b", "opencode.jsonc")))
   assert.ok(text.indexOf(join("/", "opencode.jsonc")) < text.indexOf(join("/xdg", "opencode", "opencode.jsonc")))
+})
+
+test("templateNames extracts referenced variable names", () => {
+  assert.deepEqual(templateNames("Bearer {env:TOKEN}"), ["TOKEN"])
+  assert.deepEqual(templateNames("{env:A}-{env:B}"), ["A", "B"])
+  assert.deepEqual(templateNames("plain"), [])
+})
+
+test("selectReconnectTargets with true only picks servers referencing changed keys", () => {
+  const refs: ServerReferences = new Map([
+    ["uses-changed", [{ path: ["environment", "K"], template: "{env:CHANGED_KEY}" }]],
+    ["uses-other", [{ path: ["headers", "X"], template: "Bearer {env:OTHER_KEY}" }]],
+  ])
+  const servers = [
+    { name: "uses-changed", disabled: false },
+    { name: "uses-other", disabled: false },
+    { name: "no-refs", disabled: false },
+    { name: "disabled-but-referencing", disabled: true },
+  ]
+  const withDisabled: ServerReferences = new Map(refs)
+  withDisabled.set("disabled-but-referencing", [{ path: ["environment", "K"], template: "{env:CHANGED_KEY}" }])
+
+  assert.deepEqual(selectReconnectTargets(servers, withDisabled, new Set(["CHANGED_KEY"]), true), ["uses-changed"])
+  assert.deepEqual(selectReconnectTargets(servers, withDisabled, new Set(["OTHER_KEY"]), true), ["uses-other"])
+  assert.deepEqual(selectReconnectTargets(servers, withDisabled, new Set(["UNRELATED"]), true), [])
+})
+
+test("selectReconnectTargets supports all, allowlist and false", () => {
+  const refs: ServerReferences = new Map()
+  const servers = [
+    { name: "a", disabled: false },
+    { name: "b", disabled: false },
+    { name: "c", disabled: true },
+  ]
+  const changed = new Set(["KEY"])
+  assert.deepEqual(selectReconnectTargets(servers, refs, changed, "all"), ["a", "b"])
+  assert.deepEqual(selectReconnectTargets(servers, refs, changed, ["b", "c"]), ["b"])
+  assert.deepEqual(selectReconnectTargets(servers, refs, changed, false), [])
 })

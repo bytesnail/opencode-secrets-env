@@ -117,7 +117,7 @@ Pass options with the object form in `opencode.json(c)`:
 | `override` | `boolean`  | `false` | Overwrite variables that already exist in the real environment. By default the real environment always wins. |
 | `required` | `string[]` | `[]`    | Variables that must exist after loading. A warning is logged for each missing one. |
 | `watch`    | `boolean`  | `true`  | Watch the secrets file and hot-reload `process.env` when it changes (see below). |
-| `mcpReconnect` | `boolean \| string[]` | `true` | After a hot reload, reconnect MCP servers so they pick up new values. `true` = all enabled servers, `["name"]` = only those servers, `false` = never. |
+| `mcpReconnect` | `boolean \| "all" \| string[]` | `true` | After a hot reload, reconnect MCP servers so they pick up new values. `true` = only servers whose config references a changed variable (precise), `"all"` = every enabled server, `["name"]` = only those servers, `false` = never. |
 | `quiet`    | `boolean`  | `false` | Silence info/debug messages (warnings are always shown). |
 | `debug`    | `boolean`  | `false` | Also log the *names* of applied/skipped keys. Values are never logged. |
 
@@ -134,15 +134,22 @@ within about a second — no `opencode service restart` needed:
   original shell value is restored).
 
 MCP servers are long-lived processes that received their environment at
-spawn, so after a hot reload the plugin reconnects them (`mcpReconnect`):
-each enabled server is disconnected and reconnected, and OpenCode resolves
-`{env:NAME}` against the fresh environment during the reconnect. Only
-servers you did not explicitly disable are touched. Caveats:
+spawn, so after a hot reload the plugin reconnects the affected ones
+(`mcpReconnect`). With the default `true`, "affected" is computed
+precisely: the plugin scans your raw config files for `{env:...}`
+references and only reconnects enabled servers that reference one of the
+changed variables — unrelated servers keep running untouched. Servers you
+explicitly disabled are never touched. Caveats:
 
 - A tool call in flight while its server reconnects may fail (the agent can
   simply retry).
 - Stateful MCP servers (e.g. browser automation) lose their state across a
-  reconnect — use the `mcpReconnect: ["name"]` allowlist to exclude them.
+  reconnect — they are not reconnected unless they reference a changed
+  variable, and you can exclude them further with `mcpReconnect: ["name"]`.
+- Servers that read secrets from the *inherited* environment without an
+  explicit `{env:...}` reference cannot be detected this way; they pick up
+  new values on their next natural connect, or use `mcpReconnect: "all"`
+  to restart every enabled server on each change.
 
 The plugin also registers a permanent transform that re-resolves every
 `{env:...}` reference found in your raw config files against the live
@@ -273,7 +280,7 @@ opencode service restart
 | `override` | `boolean`  | `false` | 是否覆盖真实环境中已存在的变量。默认真实环境优先。 |
 | `required` | `string[]` | `[]`    | 加载后必须存在的变量名，缺失时输出警告。 |
 | `watch`    | `boolean`  | `true`  | 监听密钥文件变化并热更新 `process.env`（见下文）。 |
-| `mcpReconnect` | `boolean \| string[]` | `true` | 热更新后自动重连 MCP 服务器使其拿到新值。`true` = 所有启用的服务器，`["名字"]` = 仅指定服务器，`false` = 不重连。 |
+| `mcpReconnect` | `boolean \| "all" \| string[]` | `true` | 热更新后自动重连 MCP 服务器使其拿到新值。`true` = 仅重连配置中引用了变化变量的服务器（精确按需），`"all"` = 所有启用的服务器，`["名字"]` = 仅指定服务器，`false` = 不重连。 |
 | `quiet`    | `boolean`  | `false` | 静默 info/debug 日志（警告始终输出）。 |
 | `debug`    | `boolean`  | `false` | 额外记录注入/跳过的**键名**（值永不记录）。 |
 
@@ -289,12 +296,18 @@ opencode service restart
   原值）。
 
 MCP 服务器是长生命周期子进程，环境变量在启动时确定，因此热更新后插件
-会自动**重连** MCP 服务器（`mcpReconnect`）：断开后立即重连，重连时
-`{env:NAME}` 按新环境重新替换。你手动禁用的服务器不会被触碰。注意：
+会**按需重连**受影响的服务器（`mcpReconnect`）。默认 `true` 为精确
+模式：插件扫描原始配置文件中的 `{env:...}` 引用，只重连引用了本次
+变化变量的启用服务器，无关服务器不受打扰；你手动禁用的服务器也不会
+被触碰。注意：
 
 - 重连瞬间该服务器上进行中的工具调用可能失败（让 agent 重试即可）；
-- 有状态的 MCP 服务器（如浏览器自动化类）重连后状态丢失 —— 可用
-  `mcpReconnect: ["名字"]` 白名单把它们排除在外。
+- 有状态的 MCP 服务器（如浏览器自动化类）重连后状态丢失 —— 只要它
+  们不引用变化的变量就不会被重连，还可用 `mcpReconnect: ["名字"]`
+  进一步收敛范围；
+- 靠进程继承环境直接读取密钥、没有显式 `{env:...}` 引用的服务器无法
+  被精确识别，它们会在下次自然重连时拿到新值；如需覆盖这类服务器，
+  使用 `mcpReconnect: "all"`。
 
 另外，插件会注册一个永久 transform：每当 OpenCode 重建 MCP 配置时，
 把原始配置文件中所有 `{env:...}` 引用按当前环境重新替换。这不仅支撑

@@ -3,7 +3,14 @@ import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 import { Plugin } from "@opencode/plugin"
 import { SecretsStore, defaultSecretsPath, expandPath, missingRequired, readSecrets } from "./env.ts"
-import { scanServerEnvRefs, setAtPath, substitute, type ServerReferences } from "./rawconfig.ts"
+import {
+  makeRefScanner,
+  selectReconnectTargets,
+  setAtPath,
+  substitute,
+  type McpReconnectOption,
+  type ServerReferences,
+} from "./rawconfig.ts"
 
 const ID = "opencode-secrets-env"
 const PREFIX = `[${ID}]`
@@ -12,8 +19,8 @@ interface NormalizedOptions {
   path?: string
   override: boolean
   watch: boolean
-  /** true = all enabled servers, string[] = only these servers, false = none. */
-  mcpReconnect: boolean | string[]
+  /** true = servers referencing changed keys, "all" = every enabled server, string[] = only these, false = none. */
+  mcpReconnect: McpReconnectOption
   quiet: boolean
   debug: boolean
   required: string[]
@@ -32,7 +39,9 @@ function normalizeOptions(raw: Record<string, unknown> | undefined): NormalizedO
     watch: options.watch !== false,
     mcpReconnect: Array.isArray(options.mcpReconnect)
       ? options.mcpReconnect.filter((name): name is string => typeof name === "string" && name.length > 0)
-      : options.mcpReconnect !== false,
+      : options.mcpReconnect === "all"
+        ? "all"
+        : options.mcpReconnect !== false,
     quiet: options.quiet === true,
     debug: options.debug === true,
     required: Array.isArray(options.required)
@@ -104,6 +113,8 @@ interface Instance {
   options: NormalizedOptions
   mcp: McpLike
   emit: Emit
+  /** Memoized scanner for {env:...} references in the location's raw config files. */
+  scanRefs: () => ServerReferences
 }
 
 interface FileState {
@@ -194,26 +205,26 @@ function loadOnce(instance: Instance, context: string): ReturnType<SecretsStore[
 // ---------------------------------------------------------------------------
 // MCP reconnection
 //
-// OpenCode resolves {env:NAME} references against the live environment each
-// time it (re)connects a server, but connected servers keep the environment
-// they were started with. So after a hot reload, reconnect the affected
-// servers: disable them through a transform (OpenCode disconnects), then
-// dispose the transform (the original config is restored and OpenCode
-// reconnects with the new values). Servers the user disabled are untouched.
+// Connected MCP servers keep the environment they were started with, so
+// after a hot reload the affected servers are reconnected: disabled through
+// a transform (OpenCode disconnects them), then re-enabled by disposing the
+// transform (the original config plus the permanent env-substitution
+// transform replay, and OpenCode reconnects with the new values). Which
+// servers count as "affected" is decided by selectReconnectTargets; servers
+// the user disabled are never touched.
 // ---------------------------------------------------------------------------
 
-async function reconnectMcp(instance: Instance): Promise<void> {
-  const option = instance.options.mcpReconnect
-  if (option === false) return
-  const allowlist = Array.isArray(option) ? new Set(option) : undefined
+async function reconnectMcp(instance: Instance, changedKeys: readonly string[]): Promise<void> {
+  if (instance.options.mcpReconnect === false) return
+  const refs = instance.scanRefs()
+  const changed = new Set(changedKeys)
 
   const targets: string[] = []
   let registration: McpRegistration
   try {
     registration = await instance.mcp.transform((editor) => {
-      for (const [name, config] of editor.list()) {
-        if (config.disabled === true) continue
-        if (allowlist && !allowlist.has(name)) continue
+      const servers = editor.list().map(([name, config]) => ({ name, disabled: config.disabled === true }))
+      for (const name of selectReconnectTargets(servers, refs, changed, instance.options.mcpReconnect)) {
         editor.update(name, (server) => {
           server.disabled = true
         })
@@ -256,11 +267,11 @@ async function reload(file: string): Promise<void> {
       const first = [...state.instances][0]
       if (!first) return
       const result = loadOnce(first, "reload")
-      const changed = result.added.length + result.updated.length + result.removed.length
-      if (changed === 0) continue
+      const changedKeys = [...result.added, ...result.updated, ...result.removed]
+      if (changedKeys.length === 0) continue
       for (const instance of state.instances) {
         try {
-          await reconnectMcp(instance)
+          await reconnectMcp(instance, changedKeys)
         } catch (cause) {
           instance.emit("warn", `MCP reconnection failed: ${(cause as Error).message}`)
         }
@@ -326,11 +337,10 @@ function dropWatcherAndStore(file: string): void {
  * (re)connect then sees current values.
  */
 async function registerEnvRefTransform(instance: Instance): Promise<McpRegistration | undefined> {
-  const refs: ServerReferences = scanServerEnvRefs(instance.directory)
-  if (refs.size === 0) return undefined
+  if (instance.scanRefs().size === 0) return undefined
   try {
     const registration = await instance.mcp.transform((editor) => {
-      for (const [name, serverRefs] of refs) {
+      for (const [name, serverRefs] of instance.scanRefs()) {
         editor.update(name, (server) => {
           for (const ref of serverRefs) {
             setAtPath(server, ref.path, substitute(ref.template))
@@ -338,7 +348,7 @@ async function registerEnvRefTransform(instance: Instance): Promise<McpRegistrat
         })
       }
     })
-    instance.emit("debug", `re-substituting {env:...} references for MCP server(s): ${[...refs.keys()].join(", ")}`)
+    instance.emit("debug", `re-substituting {env:...} references for MCP server(s): ${[...instance.scanRefs().keys()].join(", ")}`)
     return registration
   } catch (cause) {
     instance.emit("warn", `failed to register MCP env substitution: ${(cause as Error).message}`)
@@ -349,7 +359,7 @@ async function registerEnvRefTransform(instance: Instance): Promise<McpRegistrat
 function activate(options: NormalizedOptions, base: string, mcp: McpLike, directory: string): (() => void) | undefined {
   const emit = makeEmit(options)
   const file = options.path ? expandPath(options.path, base) : defaultSecretsPath()
-  const instance: Instance = { directory, file, options, mcp, emit }
+  const instance: Instance = { directory, file, options, mcp, emit, scanRefs: makeRefScanner(directory) }
 
   stateFor(file).instances.add(instance)
   loadOnce(instance, "startup")
