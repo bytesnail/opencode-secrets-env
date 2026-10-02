@@ -15,7 +15,7 @@ import {
 const ID = "opencode-secrets-env"
 const PREFIX = `[${ID}]`
 
-interface NormalizedOptions {
+export interface NormalizedOptions {
   path?: string
   override: boolean
   watch: boolean
@@ -31,7 +31,7 @@ interface NormalizedOptions {
  * normalize it into a strict shape. Unknown or wrongly typed values fall
  * back to defaults so a typo never breaks startup.
  */
-function normalizeOptions(raw: Record<string, unknown> | undefined): NormalizedOptions {
+export function normalizeOptions(raw: Record<string, unknown> | undefined): NormalizedOptions {
   const options = raw ?? {}
   return {
     path: typeof options.path === "string" && options.path.length > 0 ? options.path : undefined,
@@ -108,10 +108,10 @@ interface McpEditorLike {
 }
 
 interface Instance {
-  directory: string
   file: string
   options: NormalizedOptions
-  mcp: McpLike
+  /** Undefined when the host has no MCP transform API (OpenCode V1). */
+  mcp?: McpLike
   emit: Emit
   /** Memoized scanner for {env:...} references in the location's raw config files. */
   scanRefs: () => ServerReferences
@@ -215,7 +215,7 @@ function loadOnce(instance: Instance, context: string): ReturnType<SecretsStore[
 // ---------------------------------------------------------------------------
 
 async function reconnectMcp(instance: Instance, changedKeys: readonly string[]): Promise<void> {
-  if (instance.options.mcpReconnect === false) return
+  if (instance.options.mcpReconnect === false || !instance.mcp) return
   const refs = instance.scanRefs()
   const changed = new Set(changedKeys)
 
@@ -270,6 +270,8 @@ async function reload(file: string): Promise<void> {
       const changedKeys = [...result.added, ...result.updated, ...result.removed]
       if (changedKeys.length === 0) continue
       for (const instance of state.instances) {
+        // loadOnce already re-checked the first instance's required keys.
+        if (instance !== first) checkRequired(instance)
         try {
           await reconnectMcp(instance, changedKeys)
         } catch (cause) {
@@ -303,8 +305,13 @@ function ensureWatcher(instance: Instance): void {
       }, 300)
     })
     state.watcher.on("error", () => {
-      instance.emit("warn", `file watcher for ${instance.file} stopped; restart the service to apply future edits`)
+      try {
+        state.watcher?.close()
+      } catch {
+        // Best effort only; the watcher is already broken.
+      }
       state.watcher = undefined
+      instance.emit("warn", `file watcher for ${instance.file} stopped; restart the service to apply future edits`)
     })
     instance.emit("debug", `watching ${instance.file} for changes`)
   } catch {
@@ -337,7 +344,7 @@ function dropWatcherAndStore(file: string): void {
  * (re)connect then sees current values.
  */
 async function registerEnvRefTransform(instance: Instance): Promise<McpRegistration | undefined> {
-  if (instance.scanRefs().size === 0) return undefined
+  if (!instance.mcp || instance.scanRefs().size === 0) return undefined
   try {
     const registration = await instance.mcp.transform((editor) => {
       for (const [name, serverRefs] of instance.scanRefs()) {
@@ -356,10 +363,19 @@ async function registerEnvRefTransform(instance: Instance): Promise<McpRegistrat
   }
 }
 
-function activate(options: NormalizedOptions, base: string, mcp: McpLike, directory: string): (() => void) | undefined {
+/**
+ * Wire one plugin instance into the shared per-file state: inject the
+ * secrets, start the hot-reload watcher and register the env-substitution
+ * transform. Returns the cleanup that undoes all of it.
+ *
+ * `directory` is the location's project directory; it is the base for
+ * relative `path` options and for raw-config discovery. `mcp` is omitted on
+ * hosts without the MCP transform API (OpenCode V1).
+ */
+function activate(options: NormalizedOptions, directory: string, mcp?: McpLike): () => void {
   const emit = makeEmit(options)
-  const file = options.path ? expandPath(options.path, base) : defaultSecretsPath()
-  const instance: Instance = { directory, file, options, mcp, emit, scanRefs: makeRefScanner(directory) }
+  const file = options.path ? expandPath(options.path, directory) : defaultSecretsPath()
+  const instance: Instance = { file, options, mcp, emit, scanRefs: makeRefScanner(directory) }
 
   stateFor(file).instances.add(instance)
   loadOnce(instance, "startup")
@@ -379,18 +395,17 @@ export default {
   ...Plugin.define({
     id: ID,
     setup(ctx) {
-      return activate(normalizeOptions(ctx.options), ctx.location.directory, ctx.mcp, ctx.location.directory)
+      return activate(normalizeOptions(ctx.options), ctx.location.directory, ctx.mcp)
     },
   }),
 
-  // OpenCode V1 (>= 1.18.29) entry point. V1 has no plugin options and no MCP
-  // transform API, so it gets the default behavior without MCP reconnection.
-  async server() {
-    activate(normalizeOptions(undefined), process.cwd(), noopMcp, process.cwd())
-    return {}
+  // OpenCode V1 (>= 1.18.29) entry point. The host calls server(input,
+  // options) and later invokes the returned `dispose` hook on shutdown. V1
+  // has no MCP transform API, so env substitution and MCP reconnection are
+  // skipped; injection, hot reload and every other option still apply.
+  async server(input?: { directory?: unknown }, options?: Record<string, unknown>) {
+    const directory = typeof input?.directory === "string" ? input.directory : process.cwd()
+    const dispose = activate(normalizeOptions(options), directory)
+    return { dispose }
   },
-}
-
-const noopMcp: McpLike = {
-  transform: async () => ({ dispose: async () => {} }),
 }

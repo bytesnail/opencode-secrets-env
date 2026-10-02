@@ -33,7 +33,8 @@ project's `opencode.jsonc`:
 
 ## Usage
 
-Create the secrets file (dotenv format) and lock down its permissions:
+Create the secrets file (dotenv format) and lock down its permissions
+([secrets.env.example](./secrets.env.example) is a starting point):
 
 ```sh
 mkdir -p ~/.config/opencode
@@ -186,8 +187,10 @@ Only counts and key *names* are ever logged — never secret values.
 - **Local MCP servers inherit the full environment** of the OpenCode process,
   including every injected secret — that is the point of this plugin, but only
   run MCP servers you trust.
-- **OpenCode V1**: the package also exports a V1 (`>= 1.18.29`) entry point
-  with default behavior (global file, no overrides). V2 is the primary target.
+- **OpenCode V1**: the package also exports a V1 (`>= 1.18.29`) entry point.
+  V1 hosts have no MCP transform API, so env substitution into MCP configs and
+  MCP reconnection are skipped; secret injection, `options`, hot reload and
+  clean withdrawal on shutdown all work. V2 is the primary target.
 
 ## Development
 
@@ -199,8 +202,9 @@ npm test
 
 The package is published as TypeScript source (OpenCode loads plugins
 directly), so there is no build step. The plugin entry point is `index.ts` at
-the package root; `env.ts` contains the pure loading logic and is unit tested
-with `node --test`.
+the package root; `env.ts` holds the pure loading logic and `rawconfig.ts`
+the raw-config scanning. Everything is unit tested with `node --test`,
+including an end-to-end pass through the V1 entry point.
 
 To load a local checkout while developing, reference the directory:
 
@@ -329,3 +333,6 @@ MCP 服务器是长生命周期子进程，环境变量在启动时确定，因�
 - 插件**不会**自动读取项目目录里的 env 文件，防止恶意仓库投毒。
 - 本地 MCP 服务器会继承 OpenCode 进程的完整环境变量（包含注入的全部
   密钥），请只运行可信的 MCP 服务器。
+- **OpenCode V1**：包同时提供 V1（`>= 1.18.29`）入口。V1 宿主没有 MCP
+  transform API，因此 MCP 配置内的 `{env:...}` 重替换与 MCP 重连不可用；
+  密钥注入、插件选项、热更新与关闭时的清理均正常。V2 是主要目标。

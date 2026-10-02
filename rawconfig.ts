@@ -44,8 +44,17 @@ export function templateNames(template: string): string[] {
  * Minimal JSONC support: strip comments and trailing commas while respecting
  * string literals (including escape sequences). Good enough for OpenCode
  * config files without taking a dependency.
+ *
+ * Two string-aware passes are used so that comment markers (`//`, `/*`) and
+ * comma/bracket sequences *inside* string values are never touched — a naive
+ * regex pass would silently corrupt values such as "https://x/a,}".
  */
 export function stripJsonc(input: string): string {
+  return stripTrailingCommas(stripComments(input))
+}
+
+/** Remove line and block comments, honoring string literals. */
+function stripComments(input: string): string {
   let out = ""
   let i = 0
   let inString = false
@@ -82,8 +91,50 @@ export function stripJsonc(input: string): string {
     out += ch
     i++
   }
-  // Remove trailing commas: a comma followed only by whitespace before } or ].
-  return out.replace(/,(\s*[}\]])/g, "$1")
+  return out
+}
+
+/**
+ * Remove trailing commas (a comma followed only by whitespace before `}` or
+ * `]`), honoring string literals. Runs after comment removal, so a comment
+ * sitting between the comma and the bracket is already gone.
+ */
+function stripTrailingCommas(input: string): string {
+  let out = ""
+  let i = 0
+  let inString = false
+  while (i < input.length) {
+    const ch = input[i]!
+    if (inString) {
+      out += ch
+      if (ch === "\\" && i + 1 < input.length) {
+        out += input[i + 1]
+        i += 2
+        continue
+      }
+      if (ch === '"') inString = false
+      i++
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+      out += ch
+      i++
+      continue
+    }
+    if (ch === ",") {
+      let j = i + 1
+      while (j < input.length && /\s/.test(input[j]!)) j++
+      const closing = input[j]
+      if (closing === "}" || closing === "]") {
+        i++ // drop the comma; the bracket is emitted on a later iteration
+        continue
+      }
+    }
+    out += ch
+    i++
+  }
+  return out
 }
 
 export function parseJsonc(content: string): unknown {
@@ -183,7 +234,9 @@ export function configCandidates(locationDirectory: string, input: { xdgConfigHo
   const xdg = input.xdgConfigHome ?? process.env.XDG_CONFIG_HOME
   const home = input.home ?? homedir()
   const globalDir = xdg ? join(xdg, "opencode") : join(home, ".config", "opencode")
-  files.push(join(globalDir, "opencode.jsonc"), join(globalDir, "opencode.json"))
+  // OpenCode merges the global files in this order (later wins), so the
+  // precedence here is jsonc > json > config.json.
+  files.push(join(globalDir, "opencode.jsonc"), join(globalDir, "opencode.json"), join(globalDir, "config.json"))
   return files
 }
 

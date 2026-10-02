@@ -6,6 +6,7 @@ import { join } from "node:path"
 import {
   configCandidates,
   hasEnvRef,
+  makeRefScanner,
   parseJsonc,
   scanServerEnvRefs,
   selectReconnectTargets,
@@ -36,6 +37,31 @@ test("stripJsonc removes comments and trailing commas but keeps strings intact",
   assert.equal(parsed.url, "https://example.com//path")
   assert.equal(parsed.escaped, 'a " // not a comment')
   assert.deepEqual(parsed.list, [1, 2])
+})
+
+test("stripJsonc never touches comma/bracket sequences inside string values", () => {
+  // Regression: a regex-based trailing-comma pass corrupted values like these.
+  const parsed = JSON.parse(stripJsonc(`{
+  "url": "https://x.test/a,}",
+  "list": "b, ]",
+  "tricky": "say \\", } hi",
+  "nested": { "v": "c,}" },
+}`)) as Record<string, unknown>
+  assert.equal(parsed.url, "https://x.test/a,}")
+  assert.equal(parsed.list, "b, ]")
+  assert.equal(parsed.tricky, 'say ", } hi')
+  assert.deepEqual(parsed.nested, { v: "c,}" })
+})
+
+test("stripJsonc drops a trailing comma even when a comment sits before the bracket", () => {
+  const parsed = JSON.parse(stripJsonc(`{ "a": [1, 2, /* why */ ], // done
+}`)) as Record<string, unknown>
+  assert.deepEqual(parsed.a, [1, 2])
+})
+
+test("stripJsonc tolerates unterminated comments and strings", () => {
+  assert.equal(stripJsonc(`{ "a": 1 /* never closed`), `{ "a": 1 `)
+  assert.throws(() => parseJsonc(`{ "a": "never closed`))
 })
 
 test("parseJsonc parses a realistic opencode config", () => {
@@ -132,12 +158,68 @@ test("scanServerEnvRefs returns an empty map when nothing references env", () =>
   })
 })
 
+test("scanServerEnvRefs reads servers defined in the legacy global config.json", () => {
+  withTempDir((dir) => {
+    const xdg = join(dir, "xdg")
+    mkdirSync(join(xdg, "opencode"), { recursive: true })
+    writeFileSync(
+      join(xdg, "opencode", "config.json"),
+      `{ "mcp": { "servers": { "legacy": { "type": "remote", "url": "https://x", "headers": { "X": "{env:LEGACY_KEY}" } } } } }`,
+    )
+
+    const refs = scanServerEnvRefs(join(dir, "project"), { xdgConfigHome: xdg, home: join(dir, "home") })
+    assert.deepEqual(refs.get("legacy"), [{ path: ["headers", "X"], template: "{env:LEGACY_KEY}" }])
+  })
+})
+
 test("configCandidates orders .opencode before direct configs and ends with global", () => {
   const candidates = configCandidates(join("/", "a", "b"), { xdgConfigHome: "/xdg", home: "/home/u" })
   const text = candidates.join("\n")
   assert.ok(text.indexOf(join("/", "a", "b", ".opencode", "opencode.jsonc")) < text.indexOf(join("/", ".opencode", "opencode.jsonc")))
   assert.ok(text.indexOf(join("/", ".opencode", "opencode.jsonc")) < text.indexOf(join("/", "a", "b", "opencode.jsonc")))
   assert.ok(text.indexOf(join("/", "opencode.jsonc")) < text.indexOf(join("/xdg", "opencode", "opencode.jsonc")))
+})
+
+test("configCandidates includes the legacy global config.json at the lowest precedence", () => {
+  const candidates = configCandidates(join("/", "a"), { xdgConfigHome: "/xdg", home: "/home/u" })
+  const globalJsonc = candidates.indexOf(join("/xdg", "opencode", "opencode.jsonc"))
+  const globalJson = candidates.indexOf(join("/xdg", "opencode", "opencode.json"))
+  const globalConfigJson = candidates.indexOf(join("/xdg", "opencode", "config.json"))
+  assert.ok(globalJsonc !== -1 && globalJson !== -1)
+  assert.ok(globalConfigJson === candidates.length - 1)
+  assert.ok(globalJsonc < globalJson && globalJson < globalConfigJson)
+})
+
+test("makeRefScanner memoizes until a config file appears or changes", () => {
+  withTempDir((dir) => {
+    const project = join(dir, "project")
+    mkdirSync(project, { recursive: true })
+    const input = { xdgConfigHome: join(dir, "xdg"), home: join(dir, "home") }
+    const scanner = makeRefScanner(project, input)
+
+    const empty = scanner()
+    assert.equal(empty.size, 0)
+    // No file change -> the exact same Map instance is returned.
+    assert.equal(scanner(), empty)
+
+    writeFileSync(
+      join(project, "opencode.jsonc"),
+      `{ "mcp": { "servers": { "s": { "type": "local", "command": ["a"], "environment": { "K": "{env:A}" } } } } }`,
+    )
+    const first = scanner()
+    assert.notEqual(first, empty)
+    assert.deepEqual(first.get("s"), [{ path: ["environment", "K"], template: "{env:A}" }])
+    assert.equal(scanner(), first)
+
+    // Same path but different content (different size) -> rescan.
+    writeFileSync(
+      join(project, "opencode.jsonc"),
+      `{ "mcp": { "servers": { "s": { "type": "local", "command": ["a"], "environment": { "K": "{env:BB}" } } } } }`,
+    )
+    const second = scanner()
+    assert.notEqual(second, first)
+    assert.deepEqual(second.get("s"), [{ path: ["environment", "K"], template: "{env:BB}" }])
+  })
 })
 
 test("templateNames extracts referenced variable names", () => {
