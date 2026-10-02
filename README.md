@@ -116,8 +116,39 @@ Pass options with the object form in `opencode.json(c)`:
 | `path`     | `string`   | `~/.config/opencode/secrets.env` | Custom secrets file. Supports `~` and relative paths (resolved against the project directory). |
 | `override` | `boolean`  | `false` | Overwrite variables that already exist in the real environment. By default the real environment always wins. |
 | `required` | `string[]` | `[]`    | Variables that must exist after loading. A warning is logged for each missing one. |
+| `watch`    | `boolean`  | `true`  | Watch the secrets file and hot-reload `process.env` when it changes (see below). |
+| `mcpReconnect` | `boolean \| string[]` | `true` | After a hot reload, reconnect MCP servers so they pick up new values. `true` = all enabled servers, `["name"]` = only those servers, `false` = never. |
 | `quiet`    | `boolean`  | `false` | Silence info/debug messages (warnings are always shown). |
 | `debug`    | `boolean`  | `false` | Also log the *names* of applied/skipped keys. Values are never logged. |
+
+## Hot reload
+
+When `watch` is enabled (the default), editing `secrets.env` takes effect
+within about a second — no `opencode service restart` needed:
+
+- **Added keys** are injected into the running service's `process.env`.
+- **Changed keys** are updated in place — but only keys the plugin itself
+  injected. Variables that came from your real shell environment are never
+  touched (unless `override` is set).
+- **Deleted keys** are withdrawn from `process.env` (with `override`, the
+  original shell value is restored).
+
+MCP servers are long-lived processes that received their environment at
+spawn, so after a hot reload the plugin reconnects them (`mcpReconnect`):
+each enabled server is disconnected and reconnected, and OpenCode resolves
+`{env:NAME}` against the fresh environment during the reconnect. Only
+servers you did not explicitly disable are touched. Caveats:
+
+- A tool call in flight while its server reconnects may fail (the agent can
+  simply retry).
+- Stateful MCP servers (e.g. browser automation) lose their state across a
+  reconnect — use the `mcpReconnect: ["name"]` allowlist to exclude them.
+
+The plugin also registers a permanent transform that re-resolves every
+`{env:...}` reference found in your raw config files against the live
+environment whenever OpenCode rebuilds its MCP configuration. Besides hot
+reloads, this fixes a race where a server's *first* connection could
+otherwise start with empty substituted values.
 
 ## Logging
 
@@ -137,8 +168,9 @@ Only counts and key *names* are ever logged — never secret values.
 - **Ordering**: put `opencode-secrets-env` before other plugins in the
   `plugins` array. Plugins run their `setup()` in order, and only later
   plugins will see the injected variables.
-- **Reloading**: variables are injected once at plugin load. After editing
-  `secrets.env`, run `opencode service restart`.
+- **Reloading**: with `watch` on (default), edits to `secrets.env` apply
+  automatically within a second. With `watch: false`, run
+  `opencode service restart` after editing.
 - **Permissions**: keep the file at `chmod 600`. The plugin warns when it is
   readable by other users.
 - **No project-level auto-loading**: only your global file (or an explicitly
@@ -240,8 +272,33 @@ opencode service restart
 | `path`     | `string`   | 全局 secrets.env | 自定义密钥文件路径，支持 `~` 与相对路径（相对项目目录解析）。设置后不再读取默认文件。 |
 | `override` | `boolean`  | `false` | 是否覆盖真实环境中已存在的变量。默认真实环境优先。 |
 | `required` | `string[]` | `[]`    | 加载后必须存在的变量名，缺失时输出警告。 |
+| `watch`    | `boolean`  | `true`  | 监听密钥文件变化并热更新 `process.env`（见下文）。 |
+| `mcpReconnect` | `boolean \| string[]` | `true` | 热更新后自动重连 MCP 服务器使其拿到新值。`true` = 所有启用的服务器，`["名字"]` = 仅指定服务器，`false` = 不重连。 |
 | `quiet`    | `boolean`  | `false` | 静默 info/debug 日志（警告始终输出）。 |
 | `debug`    | `boolean`  | `false` | 额外记录注入/跳过的**键名**（值永不记录）。 |
+
+## 热更新
+
+`watch` 开启时（默认），修改 `secrets.env` 后约 1 秒内自动生效，无需
+`opencode service restart`：
+
+- **新增**的 key 立即注入运行中的服务进程；
+- **修改**的 key 原地更新 —— 但只更新插件自己注入的 key，真实 shell
+  环境里的同名变量永不被触碰（除非开启 `override`）；
+- **删除**的 key 会从 `process.env` 撤回（`override` 模式下恢复 shell
+  原值）。
+
+MCP 服务器是长生命周期子进程，环境变量在启动时确定，因此热更新后插件
+会自动**重连** MCP 服务器（`mcpReconnect`）：断开后立即重连，重连时
+`{env:NAME}` 按新环境重新替换。你手动禁用的服务器不会被触碰。注意：
+
+- 重连瞬间该服务器上进行中的工具调用可能失败（让 agent 重试即可）；
+- 有状态的 MCP 服务器（如浏览器自动化类）重连后状态丢失 —— 可用
+  `mcpReconnect: ["名字"]` 白名单把它们排除在外。
+
+另外，插件会注册一个永久 transform：每当 OpenCode 重建 MCP 配置时，
+把原始配置文件中所有 `{env:...}` 引用按当前环境重新替换。这不仅支撑
+热更新，还修复了服务器**首次连接**可能拿到空替换值的竞态问题。
 
 ## 日志
 
@@ -253,7 +310,8 @@ opencode service restart
 
 ## 注意事项
 
-- 修改 `secrets.env` 后需执行 `opencode service restart` 重新注入。
+- `watch` 开启（默认）时修改 `secrets.env` 自动生效；若关闭
+  `watch`，修改后需执行 `opencode service restart` 重新注入。
 - 请保持文件权限为 `600`；权限过宽时插件会发出警告。
 - 插件**不会**自动读取项目目录里的 env 文件，防止恶意仓库投毒。
 - 本地 MCP 服务器会继承 OpenCode 进程的完整环境变量（包含注入的全部
