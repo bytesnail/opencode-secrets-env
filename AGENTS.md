@@ -32,3 +32,10 @@ Behavioral facts verified against host source; getting these wrong is the histor
 - Plugin log wording is a **test contract**: the e2e harness and `test/index.test.ts` grep the log for phrases like `startup: N injected`, `reload: N updated/withdrawn`, `reconnecting MCP server(s)` — reword messages and tests together. The log rotates at ~256 KiB keeping one `.old` generation; when debugging a missing line, check both files.
 - Fix/feat commits bump the patch version in `package.json` and sync the lockfile with `npm install --package-lock-only` (see git history for the message pattern).
 - CI (`.github/workflows/ci.yml`): unit tests on ubuntu+windows × node 22.18/24, e2e matrix os × host. Windows-specific branches (permission checks, `~\` expansion) are why Windows CI exists — don't remove it.
+
+## Release
+
+- Publish from a clean `main` tree with `npm publish`. The package is unscoped → public by default, no `publishConfig` needed. Audit the tarball first with `npm pack --dry-run` — the `files` whitelist must never ship `test/`, `.github/` or `AGENTS.md`.
+- `prepublishOnly` runs typecheck + unit tests **only**. Run `npm run test:e2e` manually before publishing: it downloads the pinned hosts (~100MB each), which is exactly why it stays out of the publish gate.
+- Version policy: every fix/feat commit bumps the **patch** version (lockfile synced). Going 1.0.0 is a deliberate maintainer decision — never let a fix commit bump the major as a side effect.
+- `npm publish --provenance` only works from GitHub Actions OIDC (`id-token: write`); it fails from a local shell. Post-publish sanity check: `npm view opencode-secrets-env version`.
