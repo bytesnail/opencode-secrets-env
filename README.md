@@ -23,18 +23,16 @@ OpenCode V2 (`@opencode/cli` 2.x):
 opencode plugin add opencode-secrets-env
 ```
 
-OpenCode V1 (`opencode-ai` 1.x, >= 1.14.34):
+OpenCode V1 (`opencode-ai` 1.x, >= 1.14.34) has no plugin CLI command — add
+the package to the `plugin` array in `~/.config/opencode/opencode.jsonc`
+(global) or a project's `opencode.jsonc` as shown below; V1 installs npm
+plugins automatically at startup.
 
-```sh
-opencode plugin opencode-secrets-env
-```
-
-Or add it manually to `~/.config/opencode/opencode.jsonc` (global) or a
-project's `opencode.jsonc`. The `plugin` key (singular) with string or
-`[name, options]` tuple entries is the one form both V1 and V2 hosts load.
-The plural `plugins` key — V2's native form, also what `opencode plugin add`
-writes — takes string or `{ "package", "options" }` object entries and does
-not work for this plugin on V1:
+The `plugin` key (singular) with string or `[name, options]` tuple entries is
+the one form both V1 and V2 hosts load. The plural `plugins` key — V2's
+native form, also what `opencode plugin add` writes — takes string or
+`{ "package", "options" }` object entries and does not work for this plugin
+on V1:
 
 ```jsonc
 {
@@ -193,7 +191,9 @@ invisible. This plugin therefore also appends to its own log file:
 
 (`$XDG_DATA_HOME/opencode/log/...` when `XDG_DATA_HOME` is set.)
 
-Only counts and key *names* are ever logged — never secret values.
+Only counts and key *names* are ever logged — never secret values. The log
+rotates at ~256 KB, keeping one previous generation
+(`opencode-secrets-env.log.old`).
 
 ## Notes & security
 
