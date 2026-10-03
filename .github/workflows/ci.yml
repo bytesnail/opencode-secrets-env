@@ -7,10 +7,13 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        # The code has Windows-specific branches (permission checks skipped,
+        # ~\ expansion) that Linux-only CI never executes.
+        os: [ubuntu-latest, windows-latest]
         # 22.18 is the floor for running TypeScript tests without flags
         # (type stripping); 24 is the current LTS line.
         node: ["22.18", "24"]
@@ -23,3 +26,24 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+  e2e:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        # v1 = opencode-ai (1.x, V1 plugin entry), v2 = @opencode/cli (2.x,
+        # V2 setup + MCP transform API). Host versions are pinned inside
+        # test/e2e/run.mjs; bump them there deliberately.
+        host: [v1, v2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      # The harness packs the plugin, installs the real host, boots it in an
+      # isolated HOME/XDG sandbox and asserts injection, hot reload and MCP
+      # reconnect against a stub MCP server. npm ci is not needed: the e2e
+      # harness only uses node builtins.
+      - run: node test/e2e/run.mjs --host ${{ matrix.host }}
