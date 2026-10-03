@@ -246,7 +246,7 @@ top of the file; bump them deliberately.
 
 The pins track the latest stable hosts. The `engines.opencode` floor in
 `package.json` is the oldest V1 release passing the harness — 1.14.34, where
-the `mcp list` in-process bootstrap refactor (sst/opencode#25521) first
+the `mcp list` in-process bootstrap refactor (anomalyco/opencode#25521) first
 shipped; older V1 releases inject and hot-reload fine but do not load
 plugins on the `mcp list` path, so MCP processes spawned there miss the
 injected variables. Re-probe with

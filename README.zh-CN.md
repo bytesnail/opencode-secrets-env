@@ -130,7 +130,7 @@ MCP 服务器是长生命周期子进程，环境变量在启动时确定，因�
   打包当前代码，在隔离环境中真实安装并启动两代宿主（v1 = `opencode-ai`，
   v2 = `@opencode/cli`)，验证注入、热更新与 MCP 重连全链路。
 - `package.json` 的 `engines.opencode` 下限是通过该 e2e 的最旧 V1 版本
-  （1.14.34,即 `mcp list` 进程内引导重构 sst/opencode#25521 首次发布的
+  （1.14.34,即 `mcp list` 进程内引导重构 anomalyco/opencode#25521 首次发布的
   版本）;更早的 V1 版本注入与热更新正常,但 `mcp list` 路径不会加载
   插件,经该路径启动的 MCP 进程拿不到注入的变量。可用
   `OPENCODE_E2E_V1_SPEC=opencode-ai@<版本> node test/e2e/run.mjs --host v1`

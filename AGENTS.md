@@ -22,7 +22,7 @@ Behavioral facts verified against host source; getting these wrong is the histor
 ## Version anchors
 
 - `test/e2e/run.mjs` `HOST_SPECS` pins the real hosts (currently `opencode-ai@1.18.34` / `@opencode/cli@2.0.22` = latest stable). Bump deliberately; probe other versions with `OPENCODE_E2E_V1_SPEC=opencode-ai@<ver> node test/e2e/run.mjs --host v1`.
-- `engines.opencode` (`>=1.14.34`) is the oldest V1 release passing the e2e harness (bisected; boundary is the `mcp list` bootstrap refactor in sst/opencode#25521). Don't lower it without a passing probe.
+- `engines.opencode` (`>=1.14.34`) is the oldest V1 release passing the e2e harness (bisected; boundary is the `mcp list` bootstrap refactor in anomalyco/opencode#25521). Don't lower it without a passing probe. The upstream repo was renamed from `sst/opencode` to `anomalyco/opencode` (PR numbers and old links redirect); older commit messages here still cite the `sst/` name.
 - e2e harness needs **no** `npm ci` (node builtins only). On Windows, npm runs via `cmd.exe` (CVE-2024-27980); host binary is `bin/opencode.exe`. Probing V1 hosts ≤~1.15 (node wrapper at `bin/opencode`) works POSIX-only.
 
 ## Conventions
