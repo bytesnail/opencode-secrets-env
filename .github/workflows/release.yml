@@ -26,7 +26,7 @@ jobs:
     outputs:
       version: ${{ steps.check.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - id: check
         run: |
           tag="${GITHUB_REF_NAME}"
@@ -54,8 +54,8 @@ jobs:
       contents: write # gh release create
       id-token: write # npm trusted publishing / provenance (OIDC)
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           # Node 24 bundles npm >= 11.5.1, the trusted-publishing floor.
           node-version: "24"
@@ -70,10 +70,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
       - name: Verify the new version is visible on npm
         run: |
-          for i in 1 2 3 4 5 6; do
+          # npm processes publishes asynchronously ("may take a few minutes
+          # to become available") — poll generously before declaring failure.
+          for i in $(seq 1 30); do
             seen="$(npm view opencode-secrets-env version 2>/dev/null || true)"
             [ "$seen" = "${{ needs.guard.outputs.version }}" ] && exit 0
-            sleep 10
+            sleep 20
           done
           echo "::error::npm view still does not show ${{ needs.guard.outputs.version }}"
           exit 1

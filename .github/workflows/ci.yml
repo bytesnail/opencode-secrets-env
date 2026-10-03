@@ -21,8 +21,8 @@ jobs:
         # (type stripping); 24 is the current LTS line.
         node: ["22.18", "24"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -41,8 +41,8 @@ jobs:
         # test/e2e/run.mjs; bump them there deliberately.
         host: [v1, v2]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "24"
       # The harness packs the plugin, installs the real host, boots it in an
