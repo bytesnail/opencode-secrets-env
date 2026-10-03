@@ -22,7 +22,7 @@ type TransformCallback = (editor: Editor) => void
  * plugin therefore sees the same list/get/update view OpenCode would give it.
  */
 class FakeMcp {
-  private readonly base: Record<string, ServerConfig>
+  private base: Record<string, ServerConfig>
   private transforms: TransformCallback[] = []
   /** Config as materialized by the latest rebuild. */
   materialized: Record<string, ServerConfig>
@@ -37,6 +37,14 @@ class FakeMcp {
 
   get rebuilds(): number {
     return this.history.length
+  }
+
+  /** Simulate the host re-reading changed raw config files: the base config
+   * is re-materialized (refs substituted against the environment, empty when
+   * missing) and every registered transform replays. */
+  setBase(base: Record<string, ServerConfig>): void {
+    this.base = base
+    this.rebuild()
   }
 
   private rebuild(): void {
@@ -171,4 +179,38 @@ test("setup() with mcpReconnect: false applies reloads without cycling any serve
 
     cleanup()
   })
+})
+
+test("setup() registers the env-ref transform even before any references exist", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "opencode-secrets-env-mcp-"))
+  try {
+    // Initially nothing references the environment.
+    writeFileSync(
+      join(dir, "opencode.jsonc"),
+      `{ "mcp": { "servers": { "one": { "type": "local", "command": ["run"] } } } }`,
+    )
+    const secrets = join(dir, "secrets.env")
+    writeFileSync(secrets, `${KEY_ONE}=a\n`, { mode: 0o600 })
+    const mcp = new FakeMcp({ one: { type: "local", command: ["run"] } })
+
+    const rebuildsBefore = mcp.rebuilds
+    const cleanup = await setup({ path: secrets, quiet: true }, dir, mcp)
+    // One extra rebuild proves the permanent transform registered even with
+    // zero references — references added later must not need a restart.
+    assert.equal(mcp.rebuilds, rebuildsBefore + 1)
+
+    // The user adds an {env:...} reference; the host re-materializes the base
+    // config (substituting against the environment) and rebuilds.
+    writeFileSync(
+      join(dir, "opencode.jsonc"),
+      `{ "mcp": { "servers": { "one": { "type": "local", "command": ["run"], "environment": { "K": "{env:${KEY_ONE}}" } } } } }`,
+    )
+    mcp.setBase({ one: { type: "local", command: ["run"], environment: { K: "" } } })
+    assert.equal(envValue(mcp, "one"), "a")
+
+    cleanup()
+  } finally {
+    delete process.env[KEY_ONE]
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import plugin from "../index.ts"
@@ -185,6 +185,47 @@ function readLog(file: string): string {
     return ""
   }
 }
+
+test("server() warns about missing required variables even without a secrets file", async () => {
+  await withTempDir(async (dir) => {
+    const previousXdg = process.env.XDG_DATA_HOME
+    process.env.XDG_DATA_HOME = join(dir, "data")
+    try {
+      const log = join(dir, "data", "opencode", "log", "opencode-secrets-env.log")
+      const hooks = await plugin.server({ directory: dir }, { path: join(dir, "missing.env"), watch: false, required: [KEY] })
+      // The required contract is "must exist after loading" — a missing file
+      // does not excuse a missing variable.
+      assert.ok(readLog(log).includes(`required environment variable(s) missing: ${KEY}`))
+      await hooks.dispose()
+    } finally {
+      if (previousXdg === undefined) delete process.env.XDG_DATA_HOME
+      else process.env.XDG_DATA_HOME = previousXdg
+    }
+  })
+})
+
+test("server() rotates the plugin log when it grows past the cap", async () => {
+  await withTempDir(async (dir) => {
+    const previousXdg = process.env.XDG_DATA_HOME
+    process.env.XDG_DATA_HOME = join(dir, "data")
+    try {
+      const logDir = join(dir, "data", "opencode", "log")
+      mkdirSync(logDir, { recursive: true })
+      const log = join(logDir, "opencode-secrets-env.log")
+      writeFileSync(log, "x".repeat(300 * 1024))
+
+      const hooks = await plugin.server({ directory: dir }, { path: join(dir, "missing.env"), watch: false })
+      await hooks.dispose()
+
+      assert.equal(statSync(`${log}.old`).size, 300 * 1024)
+      assert.ok(statSync(log).size < 1024)
+      assert.ok(existsSync(log))
+    } finally {
+      if (previousXdg === undefined) delete process.env.XDG_DATA_HOME
+      else process.env.XDG_DATA_HOME = previousXdg
+    }
+  })
+})
 
 async function waitFor(condition: () => boolean, timeoutMs = 5000): Promise<void> {
   const start = Date.now()

@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, watch, type FSWatcher } from "node:fs"
+import { appendFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync, watch, type FSWatcher } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 import { Plugin } from "@opencode/plugin"
@@ -62,10 +62,21 @@ function logFilePath(): string {
   return join(data, "log", `${ID}.log`)
 }
 
+/** Rotate at ~256 KiB, keeping one previous generation as `<file>.old`. */
+const LOG_MAX_BYTES = 256 * 1024
+
 function appendLog(line: string): void {
   try {
     const file = logFilePath()
     mkdirSync(dirname(file), { recursive: true })
+    try {
+      if (statSync(file).size > LOG_MAX_BYTES) {
+        rmSync(`${file}.old`, { force: true })
+        renameSync(file, `${file}.old`)
+      }
+    } catch {
+      // Missing or un-stat-able file: just append below.
+    }
     appendFileSync(file, `${new Date().toISOString()} ${line}\n`, "utf8")
   } catch {
     // Logging must never break the plugin.
@@ -190,6 +201,7 @@ function loadOnce(instance: Instance, context: string): ReturnType<SecretsStore[
 
   if (read.error) {
     emit("warn", `failed to read secrets file: ${read.error.message}`)
+    checkRequired(instance)
     return { added: [], updated: [], removed: [], kept: [] }
   }
   if (!read.found) {
@@ -199,6 +211,7 @@ function loadOnce(instance: Instance, context: string): ReturnType<SecretsStore[
     } else {
       report(emit, file, result, context, 0)
     }
+    checkRequired(instance)
     return result
   }
   if (read.insecurePermissions) {
@@ -228,16 +241,23 @@ async function reconnectMcp(instance: Instance, changedKeys: readonly string[]):
   const refs = instance.scanRefs()
   const changed = new Set(changedKeys)
 
-  const targets: string[] = []
+  const targets = new Set<string>()
   let registration: McpRegistration
   try {
     registration = await instance.mcp.transform((editor) => {
-      const servers = editor.list().map(([name, config]) => ({ name, disabled: config.disabled === true }))
-      for (const name of selectReconnectTargets(servers, refs, changed, instance.options.mcpReconnect)) {
-        editor.update(name, (server) => {
-          server.disabled = true
-        })
-        targets.push(name)
+      // This callback re-runs inside every MCP config rebuild the host
+      // performs while the registration lives — it must never throw, and
+      // repeated runs must not duplicate the target list.
+      try {
+        const servers = editor.list().map(([name, config]) => ({ name, disabled: config.disabled === true }))
+        for (const name of selectReconnectTargets(servers, refs, changed, instance.options.mcpReconnect)) {
+          editor.update(name, (server) => {
+            server.disabled = true
+          })
+          targets.add(name)
+        }
+      } catch (cause) {
+        instance.emit("warn", `failed to disable MCP server(s) for reconnection: ${(cause as Error).message}`)
       }
     })
   } catch (cause) {
@@ -245,12 +265,12 @@ async function reconnectMcp(instance: Instance, changedKeys: readonly string[]):
     return
   }
 
-  if (targets.length === 0) {
+  if (targets.size === 0) {
     await registration.dispose()
     return
   }
 
-  instance.emit("info", `reconnecting MCP server(s) to apply new values: ${targets.join(", ")}`)
+  instance.emit("info", `reconnecting MCP server(s) to apply new values: ${[...targets].join(", ")}`)
   await sleep(1000)
   try {
     await registration.dispose()
@@ -350,7 +370,9 @@ function ensureWatcher(instance: Instance): void {
         if (deepest === directory) scheduleReload(current, instance.file)
         return
       }
-      if (filename !== target) return
+      // `filename` can be null on some platforms/event kinds; treat that as
+      // "maybe our file" — the debounced reload diffs and no-ops if unchanged.
+      if (filename !== null && filename !== target) return
       scheduleReload(current, instance.file)
     })
     state.watcher = watcher
@@ -364,7 +386,13 @@ function ensureWatcher(instance: Instance): void {
       // must neither clobber the replacement nor warn about a live watch.
       if (state.watcher !== watcher) return
       state.watcher = undefined
-      instance.emit("warn", `file watcher for ${instance.file} stopped; restart the service to apply future edits`)
+      // Re-arm instead of giving up: the watched directory may have been
+      // deleted (then recreated), and the deepest-existing-ancestor logic
+      // moves the watch to wherever the path can be observed again.
+      ensureWatcher(instance)
+      if (!state.watcher) {
+        instance.emit("warn", `file watcher for ${instance.file} stopped; restart the service to apply future edits`)
+      }
     })
     instance.emit(
       "debug",
@@ -398,20 +426,33 @@ function dropWatcherAndStore(file: string): void {
  * Register a permanent transform that re-substitutes every referenced field
  * from the live environment whenever the MCP config is (re)built — every
  * (re)connect then sees current values.
+ *
+ * The transform is registered even when no references exist yet: the scanner
+ * is memoized but re-reads changed config files, so references added later
+ * are picked up on the next rebuild without a restart.
  */
 async function registerEnvRefTransform(instance: Instance): Promise<McpRegistration | undefined> {
-  if (!instance.mcp || instance.scanRefs().size === 0) return undefined
+  if (!instance.mcp) return undefined
   try {
     const registration = await instance.mcp.transform((editor) => {
-      for (const [name, serverRefs] of instance.scanRefs()) {
-        editor.update(name, (server) => {
-          for (const ref of serverRefs) {
-            setAtPath(server, ref.path, substitute(ref.template))
-          }
-        })
+      // This callback re-runs inside every MCP config rebuild the host
+      // performs — it must never throw, or it would break the host's chain.
+      try {
+        const refs = instance.scanRefs()
+        for (const [name, serverRefs] of refs) {
+          editor.update(name, (server) => {
+            for (const ref of serverRefs) {
+              setAtPath(server, ref.path, substitute(ref.template))
+            }
+          })
+        }
+        if (refs.size > 0) {
+          instance.emit("debug", `re-substituting {env:...} references for MCP server(s): ${[...refs.keys()].join(", ")}`)
+        }
+      } catch (cause) {
+        instance.emit("warn", `failed to re-substitute MCP env references: ${(cause as Error).message}`)
       }
     })
-    instance.emit("debug", `re-substituting {env:...} references for MCP server(s): ${[...instance.scanRefs().keys()].join(", ")}`)
     return registration
   } catch (cause) {
     instance.emit("warn", `failed to register MCP env substitution: ${(cause as Error).message}`)
