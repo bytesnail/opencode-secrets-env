@@ -35,7 +35,12 @@ Behavioral facts verified against host source; getting these wrong is the histor
 
 ## Release
 
-- Publish from a clean `main` tree with `npm publish`. The package is unscoped → public by default, no `publishConfig` needed. Audit the tarball first with `npm pack --dry-run` — the `files` whitelist must never ship `test/`, `.github/` or `AGENTS.md`.
-- `prepublishOnly` runs typecheck + unit tests **only**. Run `npm run test:e2e` manually before publishing: it downloads the pinned hosts (~100MB each), which is exactly why it stays out of the publish gate.
+Releases are **CI-gated** by `.github/workflows/release.yml`: pushing a `v<version>` tag replays the full CI matrix (unit + real-host e2e, ubuntu+windows — reused from `ci.yml` via `workflow_call`) and only then publishes to npm with provenance and creates the GitHub Release. There is deliberately **no** `NPM_TOKEN` anywhere — npm's trusted-publisher binding only accepts this workflow's OIDC identity, so local `npm publish` fails by design.
+
+- Release flow: fix commits land on `main` carrying their patch bump (per Conventions). To release what's on main: `git tag v$(node -p "require('./package.json').version") && git push origin --tags`. The guard job fails the run when tag ≠ package.json version or the version is already on npm.
+- The `npm publish` step must stay directly in `release.yml`: npm validates the *calling* workflow's filename against the trusted-publisher binding — a publish hidden behind `workflow_call` would mismatch (reusing `ci.yml` for the test matrix only is fine).
+- One-time bootstrap: trusted publishing can only be configured once the package exists on npm (npm/cli#8544), so the **first** publish is a one-time manual `npm publish` (that one version carries no provenance). Then npmjs.com → package → Settings → Trusted publisher → GitHub Actions: org/user `bytesnail`, repo `opencode-secrets-env`, workflow filename `release.yml` (case-sensitive, `.yml` included; npm does not validate the fields until a publish runs), allowed action `npm publish`.
 - Version policy: every fix/feat commit bumps the **patch** version (lockfile synced). Going 1.0.0 is a deliberate maintainer decision — never let a fix commit bump the major as a side effect.
-- `npm publish --provenance` only works from GitHub Actions OIDC (`id-token: write`); it fails from a local shell. Post-publish sanity check: `npm view opencode-secrets-env version`.
+- Optional hardening: restrict the binding to `npm stage publish` (every release then needs 2FA approval on npmjs.com), or put the publish job in a GitHub `environment` with required reviewers — the environment name must then also be entered in the trusted-publisher binding.
+- `npm pack --dry-run` audits the tarball — the `files` whitelist must never ship `test/`, `.github/` or `AGENTS.md`.
+- GitHub's Packages sidebar links the npmjs package via provenance + the matching `repository` field (public repo required). Fallback if it never appears: a best-effort mirror publish to GitHub Packages — display-only, that registry requires auth even for public installs; npmjs stays canonical.

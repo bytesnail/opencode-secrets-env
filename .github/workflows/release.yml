@@ -1,0 +1,79 @@
+name: Release
+
+# CI-gated publishing: pushing a v<version> tag replays the full CI matrix
+# (unit + real-host e2e, ubuntu + windows) and only then publishes to npm and
+# creates the GitHub Release. npm authenticates this workflow via trusted
+# publishing (OIDC) — there is deliberately no NPM_TOKEN, so only this
+# workflow can publish and local `npm publish` fails by design.
+#
+# The `npm publish` step must stay directly in THIS file: npm validates the
+# calling workflow's filename against the trusted-publisher binding, so a
+# publish hidden behind a reusable workflow (workflow_call) would mismatch.
+# (ci.yml is reused via workflow_call for the test matrix only — that
+# direction is fine.)
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "v$version" ]; then
+            echo "::error::tag $tag does not match package.json version $version — fix the version bump or the tag"
+            exit 1
+          fi
+          if npm view "opencode-secrets-env@$version" version >/dev/null 2>&1; then
+            echo "::error::opencode-secrets-env@$version is already on npm — bump the version first"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  # The exact matrix every PR runs: unit tests on ubuntu+windows × node
+  # 22.18/24, then real-host e2e on ubuntu+windows × v1/v2.
+  ci:
+    needs: guard
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: [guard, ci]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # gh release create
+      id-token: write # npm trusted publishing / provenance (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Node 24 bundles npm >= 11.5.1, the trusted-publishing floor.
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+      # prepublishOnly (typecheck + unit tests) runs again inside npm publish.
+      # No NODE_AUTH_TOKEN anywhere on purpose: npm only engages the OIDC
+      # trusted-publisher exchange when no token is present.
+      - run: npm ci
+      - run: npm publish --provenance
+      - run: gh release create "${{ github.ref_name }}" --generate-notes --verify-tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Verify the new version is visible on npm
+        run: |
+          for i in 1 2 3 4 5 6; do
+            seen="$(npm view opencode-secrets-env version 2>/dev/null || true)"
+            [ "$seen" = "${{ needs.guard.outputs.version }}" ] && exit 0
+            sleep 10
+          done
+          echo "::error::npm view still does not show ${{ needs.guard.outputs.version }}"
+          exit 1

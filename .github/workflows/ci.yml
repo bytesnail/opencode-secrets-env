@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Reusable by release.yml: a tag-triggered release replays this exact
+  # matrix (unit + e2e, ubuntu + windows) before anything is published.
+  workflow_call:
 
 jobs:
   test:
