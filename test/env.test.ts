@@ -201,10 +201,18 @@ test("defaultSecretsPath resolution works end to end", () => {
 })
 
 test("expandPath expands tilde, keeps absolute paths and resolves relative ones", () => {
-  assert.equal(expandPath("~", "/base", "/home/user"), "/home/user")
-  assert.equal(expandPath("~/secrets.env", "/base", "/home/user"), join("/home/user", "secrets.env"))
-  assert.equal(expandPath("/etc/secrets.env", "/base", "/home/user"), "/etc/secrets.env")
-  assert.equal(expandPath("secrets.env", "/base", "/home/user"), join("/base", "secrets.env"))
+  // Fixture paths must be absolute in the platform's own sense: on Windows
+  // resolve() qualifies a POSIX-looking "/base" with the current drive,
+  // while join() does not, so the two sides would disagree for reasons that
+  // have nothing to do with expandPath.
+  const base = process.platform === "win32" ? "D:\\base" : "/base"
+  const home = process.platform === "win32" ? "D:\\home\\user" : "/home/user"
+  const elsewhere = process.platform === "win32" ? "E:\\etc\\secrets.env" : "/etc/secrets.env"
+  assert.equal(expandPath("~", base, home), home)
+  assert.equal(expandPath("~/secrets.env", base, home), join(home, "secrets.env"))
+  assert.equal(expandPath("~\\secrets.env", base, home), join(home, "secrets.env"))
+  assert.equal(expandPath(elsewhere, base, home), elsewhere)
+  assert.equal(expandPath("secrets.env", base, home), join(base, "secrets.env"))
 })
 
 test("missingRequired lists variables absent from the environment", () => {

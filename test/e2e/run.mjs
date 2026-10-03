@@ -57,6 +57,16 @@ function run(command, argv, options = {}) {
   })
 }
 
+// execFile cannot run npm's .cmd shim on Windows (CVE-2024-27980 hardening);
+// go through cmd.exe there. Host installs download tens of MB, hence the
+// longer timeout.
+function npm(argv, options = {}) {
+  const timeout = options.timeout ?? 300_000
+  return process.platform === "win32"
+    ? run("cmd.exe", ["/d", "/s", "/c", "npm", ...argv], { ...options, timeout })
+    : run("npm", argv, { ...options, timeout })
+}
+
 async function poll(description, condition, timeoutMs = 60_000) {
   const start = Date.now()
   for (;;) {
@@ -90,20 +100,20 @@ function readDump(dumpFile) {
 
 console.log(`e2e host=${host} workdir=${workdir}`)
 
-const { stdout: packName } = await run("npm", ["pack", "--silent", "--pack-destination", workdir], { cwd: repoRoot })
+const { stdout: packName } = await npm(["pack", "--silent", "--pack-destination", workdir], { cwd: repoRoot })
 const tarball = join(workdir, packName.trim().split("\n").at(-1))
 
 // Installing the tarball via npm resolves the plugin's declared dependencies
 // and unpacks it in one step (tar on Windows would be a portability trap).
 const pluginRoot = join(workdir, "plugin")
-await run("npm", ["install", "--prefix", pluginRoot, "--loglevel=error", tarball])
+await npm(["install", "--prefix", pluginRoot, "--loglevel=error", tarball])
 const pluginDir = join(pluginRoot, "node_modules", "opencode-secrets-env")
 check("plugin package installs from tarball", existsSync(join(pluginDir, "index.ts")))
 
 const hostRoot = join(workdir, "host")
 // The host's postinstall links the real platform binary into place; scripts
 // must stay enabled or the bin is a stub that only prints an error.
-await run("npm", ["install", "--prefix", hostRoot, "--loglevel=error", HOST_SPECS[host]])
+await npm(["install", "--prefix", hostRoot, "--loglevel=error", HOST_SPECS[host]])
 const hostPkg = host === "v1" ? "opencode-ai" : "@opencode/cli"
 // bin/opencode.exe is the REAL binary on every platform after postinstall
 // (the .bin/opencode shim is a .cmd on Windows; the exe path avoids it).
