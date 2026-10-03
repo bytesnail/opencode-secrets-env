@@ -17,6 +17,7 @@ Behavioral facts verified against host source; getting these wrong is the histor
 
 - **MCP config shapes**: V1 canonical is **flat** `mcp.<name>`; V2 canonical is **nested** `mcp.servers.<name>` (each host also accepts the other's form). `rawconfig.ts` must scan both; within one file the **nested** entry wins (matches V2, the only consumer of the scan — V1 has no MCP transform API).
 - **Plugin config key**: singular `plugin` (string | `[name, options]` tuple) is the only form both hosts load for this plugin. Plural `plugins` with `{package, options}` objects is V2-native only.
+- **Plugin install mechanics**: V1 has **no plugin CLI** — npm plugins named in the config's `plugin` key are auto-installed at startup (Bun, cached in `~/.cache/opencode/node_modules`). Only V2 ships `opencode plugin add` (which writes the plural key). Docs must never show a V1 CLI install command; it does not exist.
 - **Entry points**: V2 uses `Plugin.define({ id, setup(ctx) })` with `ctx.mcp.transform`; V1 uses `server(input, options)` returning `{ dispose }` — no `ctx.mcp` on V1, so env-ref re-substitution and MCP reconnection are V2-only features.
 
 ## Version anchors
@@ -28,5 +29,6 @@ Behavioral facts verified against host source; getting these wrong is the histor
 ## Conventions
 
 - Two READMEs (`README.md` English, `README.zh-CN.md`) — keep them in sync; both are user-facing docs, not translations to drift.
+- Plugin log wording is a **test contract**: the e2e harness and `test/index.test.ts` grep the log for phrases like `startup: N injected`, `reload: N updated/withdrawn`, `reconnecting MCP server(s)` — reword messages and tests together. The log rotates at ~256 KiB keeping one `.old` generation; when debugging a missing line, check both files.
 - Fix/feat commits bump the patch version in `package.json` and sync the lockfile with `npm install --package-lock-only` (see git history for the message pattern).
 - CI (`.github/workflows/ci.yml`): unit tests on ubuntu+windows × node 22.18/24, e2e matrix os × host. Windows-specific branches (permission checks, `~\` expansion) are why Windows CI exists — don't remove it.
