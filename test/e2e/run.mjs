@@ -9,7 +9,10 @@
 //
 // Host versions are pinned for reproducibility; bump them deliberately.
 // OPENCODE_E2E_V1_SPEC / OPENCODE_E2E_V2_SPEC override (e.g. to probe a newer
-// release before adopting it).
+// release before adopting it, or an older one before lowering a floor).
+// The pins track the latest stable hosts; package.json's engines.opencode
+// floor is the oldest V1 release passing this harness (see the README's
+// Development section).
 
 import { execFile, spawn } from "node:child_process"
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
@@ -115,10 +118,14 @@ const hostRoot = join(workdir, "host")
 // must stay enabled or the bin is a stub that only prints an error.
 await npm(["install", "--prefix", hostRoot, "--loglevel=error", HOST_SPECS[host]])
 const hostPkg = host === "v1" ? "opencode-ai" : "@opencode/cli"
-// bin/opencode.exe is the REAL binary on every platform after postinstall
+const hostBinDir = join(hostRoot, "node_modules", ...hostPkg.split("/"), "bin")
+// Current hosts link the REAL binary to bin/opencode.exe on every platform
 // (the .bin/opencode shim is a .cmd on Windows; the exe path avoids it).
-const bin = join(hostRoot, "node_modules", ...hostPkg.split("/"), "bin", "opencode.exe")
-check("host binary exists", existsSync(bin), bin)
+// Older V1 hosts (<= ~1.15) instead ship a node wrapper at bin/opencode that
+// spawns the platform binary; it works on POSIX (on Windows a wrapper script
+// cannot be execFile'd, so probing pre-.exe hosts is POSIX-only).
+const bin = ["opencode.exe", "opencode"].map((name) => join(hostBinDir, name)).find((candidate) => existsSync(candidate))
+check("host binary exists", bin !== undefined, hostBinDir)
 
 // ---------------------------------------------------------------------------
 // Isolated environment + real configuration
@@ -157,21 +164,28 @@ function writeSecrets(value) {
 writeSecrets(VALUE_ONE)
 
 // Plugin entry: "plugin" with [name, options] tuples is the one form that
-// both host generations understand (V1 rejects {package, options} objects
-// and silently ignores the plural "plugins" key).
+// both host generations load the same way. V1's config schema decodes the
+// singular "plugin" key only, as string | [name, options] — {package,
+// options} objects are rejected there. V2 additionally accepts the plural
+// "plugins" key with {package, options} objects (its `plugin add` command
+// writes that form). On V1 the plural key feeds the embedded next-gen
+// loader, whose plugin context has no location/mcp — this plugin cannot
+// run through it, so the singular key is required on V1.
 writeFileSync(
   join(xdgConfig, "opencode", "opencode.jsonc"),
   JSON.stringify({ autoupdate: false, plugin: [[pluginDir, { debug: true }]] }, null, 2),
 )
 
-// MCP server config in each host's canonical shape: V1 nests under
-// mcp.servers.<name>, V2 flattens to mcp.<name>.
+// MCP server config in each host's canonical shape: V1 defines servers
+// directly at mcp.<name>, V2 nests them under mcp.servers.<name>. Each host
+// still accepts the other's form (the unit tests cover the cross-shape
+// scanning); the plugin scans both.
 const stubServer = {
   type: "local",
   command: [process.execPath, stubPath],
   environment: { STUB_SUBSTITUTED: `{env:${SECRET_KEY}}` },
 }
-const mcpConfig = host === "v1" ? { mcp: { servers: { stub: stubServer } } } : { mcp: { stub: stubServer } }
+const mcpConfig = host === "v1" ? { mcp: { stub: stubServer } } : { mcp: { servers: { stub: stubServer } } }
 writeFileSync(join(project, "opencode.jsonc"), JSON.stringify(mcpConfig, null, 2))
 
 const port = 20000 + Math.floor(Math.random() * 25000)

@@ -460,7 +460,7 @@ export default {
     },
   }),
 
-  // OpenCode V1 (>= 1.18.29) entry point. The host calls server(input,
+  // OpenCode V1 (>= 1.14.34) entry point. The host calls server(input,
   // options) and later invokes the returned `dispose` hook on shutdown. V1
   // has no MCP transform API, so env substitution and MCP reconnection are
   // skipped; injection, hot reload and every other option still apply.

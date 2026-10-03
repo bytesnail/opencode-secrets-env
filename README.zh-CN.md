@@ -16,16 +16,18 @@ OpenCode V2(`@opencode/cli` 2.x):
 opencode plugin add opencode-secrets-env
 ```
 
-OpenCode V1(`opencode-ai` 1.x,>= 1.18.29):
+OpenCode V1(`opencode-ai` 1.x,>= 1.14.34):
 
 ```sh
 opencode plugin opencode-secrets-env
 ```
 
 或在 `~/.config/opencode/opencode.jsonc` 中配置。`plugin` 键(单数)配合
-字符串或 `[名字, 选项]` 元组形式在 V1/V2 上都能工作;旧式 `plugins` 键
-(复数)加 `{ "package", "options" }` 对象只有 V2 能识别。建议把本插件放
-在数组**最前面**,这样后面的插件在 `setup()` 时就能读到变量:
+字符串或 `[名字, 选项]` 元组形式是 V1/V2 都能加载的写法;复数
+`plugins` 键(V2 的原生形式,也是 `opencode plugin add` 写入的形式)接受
+字符串或 `{ "package", "options" }` 对象,但 V1 宿主无法通过它运行本
+插件。建议把本插件放在数组**最前面**,这样后面的插件在 `setup()` 时就能
+读到变量:
 
 ```jsonc
 {
@@ -43,9 +45,9 @@ chmod 600 ~/.config/opencode/secrets.env
 opencode service restart   # V2;V1 请重启 TUI / server 进程
 ```
 
-在 MCP 配置中引用(V1 宿主按下图嵌套在 `mcp.servers.<名字>` 下;V2 的
-新 schema 扁平化为 `mcp.<名字>`,同时仍兼容嵌套旧写法,本插件两种形状
-都会扫描):
+在 MCP 配置中引用(如下图嵌套在 `mcp.servers.<名字>` 下是 V2 的规范
+写法,V2 仍兼容扁平的旧式 `mcp.<名字>`;V1 宿主的规范写法是扁平的
+`mcp.<名字>`,也同样兼容下图的嵌套形式。本插件两种形状都会扫描):
 
 ```jsonc
 {
@@ -127,11 +129,17 @@ MCP 服务器是长生命周期子进程，环境变量在启动时确定，因�
 - 开发调试：`npm test` 跑单元测试；`npm run test:e2e` 会用 `npm pack`
   打包当前代码，在隔离环境中真实安装并启动两代宿主（v1 = `opencode-ai`，
   v2 = `@opencode/cli`)，验证注入、热更新与 MCP 重连全链路。
+- `package.json` 的 `engines.opencode` 下限是通过该 e2e 的最旧 V1 版本
+  （1.14.34,即 `mcp list` 进程内引导重构 sst/opencode#25521 首次发布的
+  版本）;更早的 V1 版本注入与热更新正常,但 `mcp list` 路径不会加载
+  插件,经该路径启动的 MCP 进程拿不到注入的变量。可用
+  `OPENCODE_E2E_V1_SPEC=opencode-ai@<版本> node test/e2e/run.mjs --host v1`
+  重新探测。
 - 请保持文件权限为 `600`；权限过宽时插件会发出警告。
 - 插件**不会**自动读取项目目录里的 env 文件，防止恶意仓库投毒。
 - 本地 MCP 服务器会继承 OpenCode 进程的完整环境变量（包含注入的全部
   密钥），请只运行可信的 MCP 服务器。
-- **OpenCode V1**：包同时提供 V1（`>= 1.18.29`）入口。V1 宿主没有 MCP
+- **OpenCode V1**：包同时提供 V1（`>= 1.14.34`）入口。V1 宿主没有 MCP
   transform API，因此 MCP 配置内的 `{env:...}` 重替换与 MCP 重连不可用；
   密钥注入、插件选项、热更新与关闭时的清理均正常。V2 是主要目标。
 

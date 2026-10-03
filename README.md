@@ -23,7 +23,7 @@ OpenCode V2 (`@opencode/cli` 2.x):
 opencode plugin add opencode-secrets-env
 ```
 
-OpenCode V1 (`opencode-ai` 1.x, >= 1.18.29):
+OpenCode V1 (`opencode-ai` 1.x, >= 1.14.34):
 
 ```sh
 opencode plugin opencode-secrets-env
@@ -31,9 +31,10 @@ opencode plugin opencode-secrets-env
 
 Or add it manually to `~/.config/opencode/opencode.jsonc` (global) or a
 project's `opencode.jsonc`. The `plugin` key (singular) with string or
-`[name, options]` tuple entries works on both V1 and V2 hosts — the legacy
-`plugins` key with `{ "package", "options" }` objects is only understood by
-V2:
+`[name, options]` tuple entries is the one form both V1 and V2 hosts load.
+The plural `plugins` key — V2's native form, also what `opencode plugin add`
+writes — takes string or `{ "package", "options" }` object entries and does
+not work for this plugin on V1:
 
 ```jsonc
 {
@@ -83,9 +84,10 @@ Reference the variables from your OpenCode configuration:
 }
 ```
 
-(MCP servers nest under `mcp.servers.<name>` on V1 hosts, as shown. V2's
-canonical schema flattens this to `mcp.<name>` — V2 still accepts the nested
-legacy form, and this plugin scans both shapes.)
+(Nesting under `mcp.servers.<name>`, as shown, is V2's canonical schema; V2
+still accepts the flat legacy `mcp.<name>` form. V1 hosts canonically define
+servers directly at `mcp.<name>` and likewise accept the nested form shown.
+This plugin scans both shapes.)
 
 Restart OpenCode so the plugin (re)injects the variables — on V2 that is the
 background service:
@@ -196,7 +198,7 @@ Only counts and key *names* are ever logged — never secret values.
 ## Notes & security
 
 - **Ordering**: put `opencode-secrets-env` before other plugins in the
-  `plugins` array. Plugins run their `setup()` in order, and only later
+  `plugin` array. Plugins run their `setup()` in order, and only later
   plugins will see the injected variables.
 - **Reloading**: with `watch` on (default), edits to `secrets.env` apply
   automatically within a second. With `watch: false`, restart OpenCode after
@@ -209,7 +211,7 @@ Only counts and key *names* are ever logged — never secret values.
 - **Local MCP servers inherit the full environment** of the OpenCode process,
   including every injected secret — that is the point of this plugin, but only
   run MCP servers you trust.
-- **OpenCode V1**: the package also exports a V1 (`>= 1.18.29`) entry point.
+- **OpenCode V1**: the package also exports a V1 (`>= 1.14.34`) entry point.
   V1 hosts have no MCP transform API, so env substitution into MCP configs and
   MCP reconnection are skipped; secret injection, `options`, hot reload and
   clean withdrawal on shutdown all work. V2 is the primary target.
@@ -228,8 +230,8 @@ npm run test:e2e:v2   # only against @opencode/cli (V2 host)
 The package is published as TypeScript source (OpenCode loads plugins
 directly), so there is no build step. The plugin entry point is `index.ts` at
 the package root; `env.ts` holds the pure loading logic and `rawconfig.ts`
-the raw-config scanning (both the V1 `mcp.servers.<name>` and the V2 flat
-`mcp.<name>` shapes). Everything is unit tested with `node --test`,
+the raw-config scanning (both the flat V1 `mcp.<name>` and the nested V2
+`mcp.servers.<name>` shapes). Everything is unit tested with `node --test`,
 including an end-to-end pass through the V1 entry point and a V2 pass
 through `setup()` with a fake MCP domain covering env-ref substitution and
 precise reconnection.
@@ -241,6 +243,14 @@ the plugin with `npm pack`, installs it, installs the pinned host CLI
 plugin load, secrets injection, a stub MCP server spawned with the values,
 hot reload and (on V2) the reconnect cycle. Host versions are pinned at the
 top of the file; bump them deliberately.
+
+The pins track the latest stable hosts. The `engines.opencode` floor in
+`package.json` is the oldest V1 release passing the harness — 1.14.34, where
+the `mcp list` in-process bootstrap refactor (sst/opencode#25521) first
+shipped; older V1 releases inject and hot-reload fine but do not load
+plugins on the `mcp list` path, so MCP processes spawned there miss the
+injected variables. Re-probe with
+`OPENCODE_E2E_V1_SPEC=opencode-ai@<version> node test/e2e/run.mjs --host v1`.
 
 To load a local checkout while developing, reference the directory:
 
