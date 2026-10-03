@@ -17,17 +17,28 @@ to a dotfiles repo without leaking keys.
 
 ## Install
 
+OpenCode V2 (`@opencode/cli` 2.x):
+
 ```sh
 opencode plugin add opencode-secrets-env
 ```
 
+OpenCode V1 (`opencode-ai` 1.x, >= 1.18.29):
+
+```sh
+opencode plugin opencode-secrets-env
+```
+
 Or add it manually to `~/.config/opencode/opencode.jsonc` (global) or a
-project's `opencode.jsonc`:
+project's `opencode.jsonc`. The `plugin` key (singular) with string or
+`[name, options]` tuple entries works on both V1 and V2 hosts — the legacy
+`plugins` key with `{ "package", "options" }` objects is only understood by
+V2:
 
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": [
+  "plugin": [
     // list it FIRST so later plugins already see the variables in their setup()
     "opencode-secrets-env"
   ]
@@ -53,7 +64,7 @@ Reference the variables from your OpenCode configuration:
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["opencode-secrets-env"],
+  "plugin": ["opencode-secrets-env"],
   "mcp": {
     "servers": {
       "context7": {
@@ -72,10 +83,15 @@ Reference the variables from your OpenCode configuration:
 }
 ```
 
-Restart the service so the plugin (re)injects the variables:
+(MCP servers nest under `mcp.servers.<name>` on V1 hosts, as shown. V2's
+canonical schema flattens this to `mcp.<name>` — V2 still accepts the nested
+legacy form, and this plugin scans both shapes.)
+
+Restart OpenCode so the plugin (re)injects the variables — on V2 that is the
+background service:
 
 ```sh
-opencode service restart
+opencode service restart   # V2; on V1 restart the TUI / server process
 ```
 
 The file location follows the XDG Base Directory spec, like OpenCode itself:
@@ -97,20 +113,18 @@ EMPTY=
 
 ## Options
 
-Pass options with the object form in `opencode.json(c)`:
+Pass options with the tuple form in `opencode.json(c)` — `[name, options]`
+works on both V1 and V2 hosts:
 
 ```jsonc
 {
-  "plugins": [
-    {
-      "package": "opencode-secrets-env",
-      "options": {
-        "path": "~/secrets/work.env",
-        "override": false,
-        "required": ["GITHUB_TOKEN"],
-        "debug": true
-      }
-    }
+  "plugin": [
+    ["opencode-secrets-env", {
+      "path": "~/secrets/work.env",
+      "override": false,
+      "required": ["GITHUB_TOKEN"],
+      "debug": true
+    }]
   ]
 }
 ```
@@ -185,8 +199,8 @@ Only counts and key *names* are ever logged — never secret values.
   `plugins` array. Plugins run their `setup()` in order, and only later
   plugins will see the injected variables.
 - **Reloading**: with `watch` on (default), edits to `secrets.env` apply
-  automatically within a second. With `watch: false`, run
-  `opencode service restart` after editing.
+  automatically within a second. With `watch: false`, restart OpenCode after
+  editing (`opencode service restart` on V2).
 - **Permissions**: keep the file at `chmod 600`. The plugin warns when it is
   readable by other users.
 - **No project-level auto-loading**: only your global file (or an explicitly
@@ -205,16 +219,28 @@ Only counts and key *names* are ever logged — never secret values.
 ```sh
 npm install
 npm run typecheck
-npm test
+npm test              # unit tests (node --test)
+npm run test:e2e      # real-host end-to-end tests (v2 then v1)
+npm run test:e2e:v1   # only against opencode-ai (V1 host)
+npm run test:e2e:v2   # only against @opencode/cli (V2 host)
 ```
 
 The package is published as TypeScript source (OpenCode loads plugins
 directly), so there is no build step. The plugin entry point is `index.ts` at
 the package root; `env.ts` holds the pure loading logic and `rawconfig.ts`
-the raw-config scanning. Everything is unit tested with `node --test`,
+the raw-config scanning (both the V1 `mcp.servers.<name>` and the V2 flat
+`mcp.<name>` shapes). Everything is unit tested with `node --test`,
 including an end-to-end pass through the V1 entry point and a V2 pass
 through `setup()` with a fake MCP domain covering env-ref substitution and
 precise reconnection.
+
+`test/e2e/run.mjs` goes further and tests against the real hosts: it packs
+the plugin with `npm pack`, installs it, installs the pinned host CLI
+(`opencode-ai` / `@opencode/cli`), boots it with an isolated
+`HOME`/`XDG_*`/`OPENCODE_TEST_HOME` sandbox and asserts the full chain —
+plugin load, secrets injection, a stub MCP server spawned with the values,
+hot reload and (on V2) the reconnect cycle. Host versions are pinned at the
+top of the file; bump them deliberately.
 
 To load a local checkout while developing, reference the directory:
 

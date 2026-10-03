@@ -184,19 +184,37 @@ export function setAtPath(target: unknown, path: readonly (string | number)[], v
 
 /**
  * Extract MCP server references from one parsed config document.
+ *
+ * Two shapes exist in the wild: OpenCode V1 nests server definitions under
+ * `mcp.servers.<name>`, while the V2 schema puts them directly at
+ * `mcp.<name>` (V2 still migrates the nested legacy form, so both must be
+ * scanned). Within one file a flat definition wins over a legacy one with
+ * the same name; the `servers` key itself is reserved as the legacy
+ * container and is never a server name.
  */
 function refsFromConfig(config: unknown, into: ServerReferences): void {
   if (config === null || typeof config !== "object") return
-  const servers = (config as Record<string, unknown>).mcp
-  if (servers === null || typeof servers !== "object") return
-  const entries = (servers as Record<string, unknown>).servers
-  if (entries === null || typeof entries !== "object") return
-  for (const [name, definition] of Object.entries(entries as Record<string, unknown>)) {
-    if (into.has(name)) continue // higher-precedence file already claimed it
-    const refs: EnvReference[] = []
-    collectRefs(definition, [], refs)
-    if (refs.length > 0) into.set(name, refs)
+  const mcp = (config as Record<string, unknown>).mcp
+  if (mcp === null || typeof mcp !== "object") return
+  const container = mcp as Record<string, unknown>
+
+  for (const [name, definition] of Object.entries(container)) {
+    if (name === "servers") continue
+    collectServerRefs(name, definition, into)
   }
+  const legacy = container.servers
+  if (legacy !== null && typeof legacy === "object") {
+    for (const [name, definition] of Object.entries(legacy as Record<string, unknown>)) {
+      collectServerRefs(name, definition, into)
+    }
+  }
+}
+
+function collectServerRefs(name: string, definition: unknown, into: ServerReferences): void {
+  if (into.has(name)) return // higher-precedence file or flat entry already claimed it
+  const refs: EnvReference[] = []
+  collectRefs(definition, [], refs)
+  if (refs.length > 0) into.set(name, refs)
 }
 
 function readConfigFile(file: string): unknown | undefined {

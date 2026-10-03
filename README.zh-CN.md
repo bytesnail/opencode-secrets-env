@@ -10,17 +10,27 @@ MCP 服务器（`{env:NAME}` 替换）和其他插件使用，避免把密钥写
 
 ## 安装
 
+OpenCode V2(`@opencode/cli` 2.x):
+
 ```sh
 opencode plugin add opencode-secrets-env
 ```
 
-或在 `~/.config/opencode/opencode.jsonc` 中配置（建议放在 `plugins` 数组
-**最前面**，这样后面的插件在 `setup()` 时就能读到变量）：
+OpenCode V1(`opencode-ai` 1.x,>= 1.18.29):
+
+```sh
+opencode plugin opencode-secrets-env
+```
+
+或在 `~/.config/opencode/opencode.jsonc` 中配置。`plugin` 键(单数)配合
+字符串或 `[名字, 选项]` 元组形式在 V1/V2 上都能工作;旧式 `plugins` 键
+(复数)加 `{ "package", "options" }` 对象只有 V2 能识别。建议把本插件放
+在数组**最前面**,这样后面的插件在 `setup()` 时就能读到变量:
 
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["opencode-secrets-env"]
+  "plugin": ["opencode-secrets-env"]
 }
 ```
 
@@ -30,10 +40,12 @@ opencode plugin add opencode-secrets-env
 mkdir -p ~/.config/opencode
 echo 'Z_AI_API_KEY=your-key' >> ~/.config/opencode/secrets.env
 chmod 600 ~/.config/opencode/secrets.env
-opencode service restart
+opencode service restart   # V2;V1 请重启 TUI / server 进程
 ```
 
-在 MCP 配置中引用：
+在 MCP 配置中引用(V1 宿主按下图嵌套在 `mcp.servers.<名字>` 下;V2 的
+新 schema 扁平化为 `mcp.<名字>`,同时仍兼容嵌套旧写法,本插件两种形状
+都会扫描):
 
 ```jsonc
 {
@@ -111,7 +123,10 @@ MCP 服务器是长生命周期子进程，环境变量在启动时确定，因�
 ## 注意事项
 
 - `watch` 开启（默认）时修改 `secrets.env` 自动生效；若关闭
-  `watch`，修改后需执行 `opencode service restart` 重新注入。
+  `watch`，修改后需重启 OpenCode 重新注入（V2 执行 `opencode service restart`）。
+- 开发调试：`npm test` 跑单元测试；`npm run test:e2e` 会用 `npm pack`
+  打包当前代码，在隔离环境中真实安装并启动两代宿主（v1 = `opencode-ai`，
+  v2 = `@opencode/cli`)，验证注入、热更新与 MCP 重连全链路。
 - 请保持文件权限为 `600`；权限过宽时插件会发出警告。
 - 插件**不会**自动读取项目目录里的 env 文件，防止恶意仓库投毒。
 - 本地 MCP 服务器会继承 OpenCode 进程的完整环境变量（包含注入的全部

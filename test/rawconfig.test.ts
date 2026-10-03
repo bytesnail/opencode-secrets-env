@@ -188,6 +188,71 @@ test("scanServerEnvRefs reads servers defined in the legacy global config.json",
   })
 })
 
+// OpenCode V2's canonical schema puts server definitions directly at
+// mcp.<name> instead of nesting them under mcp.servers.<name>.
+
+test("scanServerEnvRefs reads the flat V2 mcp shape", () => {
+  withTempDir((dir) => {
+    writeFileSync(
+      join(dir, "opencode.jsonc"),
+      `{ "mcp": { "flat": { "type": "remote", "url": "https://x", "headers": { "Authorization": "Bearer {env:FLAT_KEY}" } } } }`,
+    )
+    const refs = scanServerEnvRefs(dir, { xdgConfigHome: join(dir, "xdg"), home: join(dir, "home") })
+    assert.deepEqual(refs.get("flat"), [{ path: ["headers", "Authorization"], template: "Bearer {env:FLAT_KEY}" }])
+  })
+})
+
+test("scanServerEnvRefs finds both shapes in one file and lets the flat entry win", () => {
+  withTempDir((dir) => {
+    writeFileSync(
+      join(dir, "opencode.jsonc"),
+      `{
+      "mcp": {
+        "shared": { "type": "local", "command": ["run"], "environment": { "K": "{env:FLAT_WINS}" } },
+        "legacy-only": { "type": "local", "command": ["run"], "environment": { "K": "{env:WRONG}" } },
+        "servers": {
+          "shared": { "type": "local", "command": ["run"], "environment": { "K": "{env:LEGACY_LOSES}" } },
+          "nested-only": { "type": "local", "command": ["run"], "environment": { "K": "{env:NESTED_KEY}" } }
+        }
+      }
+    }`,
+    )
+    const refs = scanServerEnvRefs(dir, { xdgConfigHome: join(dir, "xdg"), home: join(dir, "home") })
+    assert.deepEqual([...refs.keys()].sort(), ["legacy-only", "nested-only", "shared"])
+    assert.deepEqual(refs.get("shared"), [{ path: ["environment", "K"], template: "{env:FLAT_WINS}" }])
+    assert.deepEqual(refs.get("nested-only"), [{ path: ["environment", "K"], template: "{env:NESTED_KEY}" }])
+    assert.deepEqual(refs.get("legacy-only"), [{ path: ["environment", "K"], template: "{env:WRONG}" }])
+  })
+})
+
+test("scanServerEnvRefs ignores enabled-only toggle entries in the flat shape", () => {
+  withTempDir((dir) => {
+    writeFileSync(
+      join(dir, "opencode.jsonc"),
+      `{ "mcp": { "some-builtin": { "enabled": false }, "real": { "type": "local", "command": ["run", "{env:REAL_KEY}"] } } }`,
+    )
+    const refs = scanServerEnvRefs(dir, { xdgConfigHome: join(dir, "xdg"), home: join(dir, "home") })
+    assert.deepEqual([...refs.keys()], ["real"])
+    assert.deepEqual(refs.get("real"), [{ path: ["command", 1], template: "{env:REAL_KEY}" }])
+  })
+})
+
+test("scanServerEnvRefs applies file precedence across shapes", () => {
+  withTempDir((dir) => {
+    const project = join(dir, "project")
+    mkdirSync(project, { recursive: true })
+    // Project file defines "s" with the legacy nested shape.
+    writeFileSync(join(project, "opencode.jsonc"), `{ "mcp": { "servers": { "s": { "type": "local", "command": ["a"], "environment": { "K": "{env:PROJECT}" } } } } }`)
+    const xdg = join(dir, "xdg")
+    mkdirSync(join(xdg, "opencode"), { recursive: true })
+    // Global file defines the same server with the flat shape — must lose.
+    writeFileSync(join(xdg, "opencode", "opencode.jsonc"), `{ "mcp": { "s": { "type": "local", "command": ["a"], "environment": { "K": "{env:GLOBAL}" } } } }`)
+
+    const refs = scanServerEnvRefs(project, { xdgConfigHome: xdg, home: join(dir, "home") })
+    assert.deepEqual(refs.get("s"), [{ path: ["environment", "K"], template: "{env:PROJECT}" }])
+  })
+})
+
 test("configCandidates orders .opencode before direct configs and ends with global", () => {
   const candidates = configCandidates(join("/", "a", "b"), { xdgConfigHome: "/xdg", home: "/home/u" })
   const text = candidates.join("\n")
