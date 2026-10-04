@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Weekly drift detection: on top of the pinned matrix, the e2e job also
+  # runs against the *latest* host releases, so a host update that breaks
+  # behavior the plugin relies on surfaces here before users report it.
+  schedule:
+    - cron: "0 6 * * 1"
+  # Manual runs get the same latest-host pass.
+  workflow_dispatch:
   # Reusable by release.yml: a tag-triggered release replays this exact
   # matrix (unit + e2e, ubuntu + windows) before anything is published.
   workflow_call:
@@ -50,3 +57,13 @@ jobs:
       # reconnect against a stub MCP server. npm ci is not needed: the e2e
       # harness only uses node builtins.
       - run: node test/e2e/run.mjs --host ${{ matrix.host }}
+      # Weekly/manual runs only: repeat against the newest published hosts.
+      # The pins in test/e2e/run.mjs are deliberately sticky; a failure here
+      # means a new host release changed something — align the plugin, then
+      # bump the pins. (Step-level env works on cmd.exe too.)
+      - name: e2e against latest hosts
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          OPENCODE_E2E_V1_SPEC: opencode-ai@latest
+          OPENCODE_E2E_V2_SPEC: "@opencode/cli@latest"
+        run: node test/e2e/run.mjs --host ${{ matrix.host }}
