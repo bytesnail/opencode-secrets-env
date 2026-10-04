@@ -3,7 +3,9 @@
 // host with an isolated HOME/XDG environment, and asserts the full chain:
 // plugin load -> secrets injected -> stub MCP server spawned with the values
 // -> hot reload -> MCP reconnect picks up the new values (V2 only; V1 hosts
-// have no MCP transform API).
+// have no MCP transform API). The V2 flow additionally defines a second stub
+// via OPENCODE_CONFIG_CONTENT to prove references in the highest-precedence
+// inline source are re-substituted and reconnected like file-based ones.
 //
 // Usage: node test/e2e/run.mjs --host v1|v2 [--keep]
 //
@@ -15,7 +17,7 @@
 // Development section).
 
 import { execFile, spawn } from "node:child_process"
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { request } from "node:http"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -195,33 +197,64 @@ const port = 20000 + Math.floor(Math.random() * 25000)
 // ---------------------------------------------------------------------------
 
 async function v2Flow() {
+  // OPENCODE_CONFIG_CONTENT is the highest-precedence config source. The
+  // service substitutes its {env:...} references at boot — before the plugin
+  // has injected anything — so they materialize empty; the plugin's env-ref
+  // transform must repair them from the raw inline content.
+  env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
+    mcp: {
+      servers: {
+        "stub-content": {
+          type: "local",
+          command: [process.execPath, stubPath],
+          environment: { STUB_NAME: "content", STUB_SUBSTITUTED: `{env:${SECRET_KEY}}` },
+        },
+      },
+    },
+  })
   // The managed service uses a FIXED default port; on a shared machine (or a
   // developer box already running OpenCode) it would collide, so pick one.
   await run(bin, ["service", "set", "port", String(port)], { cwd: project, env })
   await run(bin, ["service", "start"], { cwd: project, env })
+  const dumpNamed = (name) => readDump(dumpFile).filter((record) => record.name === name)
   try {
     // A location boots (plugin load + eager MCP connect) when a CLI command
     // touches the running service from the project directory.
     await run(bin, ["mcp", "list"], { cwd: project, env })
 
-    await poll("initial stub spawn", () => readDump(dumpFile).length >= 1)
-    const [first] = readDump(dumpFile)
+    await poll("initial stub spawn", () => dumpNamed("stub").length >= 1 && dumpNamed("content").length >= 1)
+    const first = dumpNamed("stub")[0]
     check("v2: plugin injected into host environment (inherited by MCP process)", first.inherited === VALUE_ONE, JSON.stringify(first))
     check("v2: {env:...} substitution delivered to MCP config", first.substituted === VALUE_ONE, JSON.stringify(first))
     check(
       "v2: plugin log records startup injection",
       readLines(pluginLog).some((line) => line.includes("startup: 1 injected")),
     )
+    const firstContent = dumpNamed("content")[0]
+    check(
+      "v2: {env:...} in OPENCODE_CONFIG_CONTENT re-substituted by the plugin",
+      firstContent.substituted === VALUE_ONE,
+      JSON.stringify(firstContent),
+    )
 
     writeSecrets(VALUE_TWO)
     await poll(
       "hot reload + reconnect",
-      () => readLines(pluginLog).some((line) => line.includes("reconnecting MCP server(s)")) && readDump(dumpFile).length >= 2,
+      () =>
+        readLines(pluginLog).some((line) => line.includes("reconnecting MCP server(s)")) &&
+        dumpNamed("stub").length >= 2 &&
+        dumpNamed("content").length >= 2,
     )
-    const [_, second] = readDump(dumpFile)
+    const second = dumpNamed("stub")[1]
     check("v2: MCP server respawned after reload", second.pid !== first.pid, `pids ${first.pid} -> ${second.pid}`)
     check("v2: respawned MCP process inherited the new value", second.inherited === VALUE_TWO, JSON.stringify(second))
     check("v2: respawned MCP config re-substituted the new value", second.substituted === VALUE_TWO, JSON.stringify(second))
+    const secondContent = dumpNamed("content")[1]
+    check(
+      "v2: OPENCODE_CONFIG_CONTENT server reconnected on the change",
+      secondContent.pid !== firstContent.pid && secondContent.substituted === VALUE_TWO,
+      JSON.stringify(secondContent),
+    )
   } finally {
     await run(bin, ["service", "stop"], { cwd: project, env }).catch(() => {})
   }
@@ -231,8 +264,8 @@ async function v1Flow() {
   const password = "e2e-pw"
   const serveOut = join(workdir, "serve.stdout.log")
   const serveErr = join(workdir, "serve.stderr.log")
-  const outFd = (await import("node:fs")).openSync(serveOut, "w")
-  const errFd = (await import("node:fs")).openSync(serveErr, "w")
+  const outFd = openSync(serveOut, "w")
+  const errFd = openSync(serveErr, "w")
   const serve = spawn(bin, ["serve", "--port", String(port), "--hostname", "127.0.0.1"], {
     cwd: project,
     env: { ...env, OPENCODE_SERVER_PASSWORD: password },

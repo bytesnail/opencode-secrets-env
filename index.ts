@@ -5,9 +5,9 @@ import { Plugin } from "@opencode/plugin"
 import { SecretsStore, defaultSecretsPath, expandPath, missingRequired, readSecrets } from "./env.ts"
 import {
   makeRefScanner,
+  resolveTemplate,
   selectReconnectTargets,
   setAtPath,
-  substitute,
   type McpReconnectOption,
   type ServerReferences,
 } from "./rawconfig.ts"
@@ -34,7 +34,7 @@ export interface NormalizedOptions {
 export function normalizeOptions(raw: Record<string, unknown> | undefined): NormalizedOptions {
   const options = raw ?? {}
   return {
-    path: typeof options.path === "string" && options.path.length > 0 ? options.path : undefined,
+    path: typeof options.path === "string" && options.path.trim().length > 0 ? options.path.trim() : undefined,
     override: options.override === true,
     watch: options.watch !== false,
     mcpReconnect: Array.isArray(options.mcpReconnect)
@@ -114,7 +114,6 @@ interface McpLike {
 
 interface McpEditorLike {
   list(): readonly (readonly [string, Record<string, unknown>])[]
-  get(name: string): Record<string, unknown> | undefined
   update(name: string, update: (config: Record<string, unknown>) => void): void
 }
 
@@ -237,7 +236,9 @@ function loadOnce(instance: Instance, context: string): ReturnType<SecretsStore[
 // ---------------------------------------------------------------------------
 
 async function reconnectMcp(instance: Instance, changedKeys: readonly string[]): Promise<void> {
+  // An empty allowlist means "no servers": skip the pointless transform cycle.
   if (instance.options.mcpReconnect === false || !instance.mcp) return
+  if (Array.isArray(instance.options.mcpReconnect) && instance.options.mcpReconnect.length === 0) return
   const refs = instance.scanRefs()
   const changed = new Set(changedKeys)
 
@@ -442,7 +443,7 @@ async function registerEnvRefTransform(instance: Instance): Promise<McpRegistrat
         for (const [name, serverRefs] of refs) {
           editor.update(name, (server) => {
             for (const ref of serverRefs) {
-              setAtPath(server, ref.path, substitute(ref.template))
+              setAtPath(server, ref.path, resolveTemplate(ref))
             }
           })
         }

@@ -177,12 +177,19 @@ test("SecretsStore treats an existing empty string as a real value", () => {
 
 test("defaultSecretsPath prefers XDG_CONFIG_HOME and falls back to ~/.config", () => {
   assert.equal(
-    defaultSecretsPath({ xdgConfigHome: "/xdg", home: "/home/user" }),
+    defaultSecretsPath({ xdgConfigHome: "/xdg", home: "/home/user", configDir: "" }),
     join("/xdg", "opencode", "secrets.env"),
   )
   assert.equal(
-    defaultSecretsPath({ xdgConfigHome: "", home: "/home/user" }),
+    defaultSecretsPath({ xdgConfigHome: "", home: "/home/user", configDir: "" }),
     join("/home/user", ".config", "opencode", "secrets.env"),
+  )
+})
+
+test("defaultSecretsPath follows OPENCODE_CONFIG_DIR like the host's global config directory", () => {
+  assert.equal(
+    defaultSecretsPath({ configDir: "/managed", xdgConfigHome: "/xdg", home: "/home/user" }),
+    join("/managed", "secrets.env"),
   )
 })
 
@@ -193,7 +200,7 @@ test("defaultSecretsPath resolution works end to end", () => {
     const file = join(config, "opencode", "secrets.env")
     writeFileSync(file, "API_KEY=xdg-secret\n", { mode: 0o600 })
 
-    const resolved = defaultSecretsPath({ xdgConfigHome: config })
+    const resolved = defaultSecretsPath({ xdgConfigHome: config, configDir: "" })
     assert.equal(resolved, file)
     const read = readSecrets(resolved)
     assert.equal(read.parsed.API_KEY, "xdg-secret")

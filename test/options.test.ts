@@ -59,6 +59,11 @@ test("normalizeOptions treats an empty path as unset", () => {
   assert.equal(normalizeOptions({ path: "" }).path, undefined)
 })
 
+test("normalizeOptions trims the path and treats whitespace-only as unset", () => {
+  assert.equal(normalizeOptions({ path: "  ~/secrets.env  " }).path, "~/secrets.env")
+  assert.equal(normalizeOptions({ path: "   " }).path, undefined)
+})
+
 test("normalizeOptions normalizes the mcpReconnect variants", () => {
   assert.equal(normalizeOptions({ mcpReconnect: false }).mcpReconnect, false)
   assert.equal(normalizeOptions({ mcpReconnect: true }).mcpReconnect, true)

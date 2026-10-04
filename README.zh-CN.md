@@ -90,7 +90,8 @@ chmod 600 ~/.config/opencode/secrets.env
 opencode service restart   # V2；V1 请重启 TUI / server 进程
 ```
 
-文件路径遵循 XDG Base Directory 规范，与 OpenCode 自身一致：设置了
+文件路径跟随 OpenCode 自身的全局配置目录解析：设置了
+`OPENCODE_CONFIG_DIR` 时为 `$OPENCODE_CONFIG_DIR/secrets.env`，其次设置了
 `XDG_CONFIG_HOME` 时为 `$XDG_CONFIG_HOME/opencode/secrets.env`，否则为
 `~/.config/opencode/secrets.env`。
 
@@ -151,8 +152,12 @@ EMPTY=
 
 MCP 服务器是长生命周期进程，环境变量在启动时确定，因此热更新后插件会
 重连受影响的服务器（`mcpReconnect`）。默认 `true` 为精确模式：插件扫描
-原始配置文件中的 `{env:...}` 引用，只重连引用了本次变化变量的启用服务
-器 —— 无关服务器不受打扰；你手动禁用的服务器也不会被触碰。注意：
+原始配置来源中的 `{env:...}` 引用，只重连引用了本次变化变量的启用服务
+器 —— 无关服务器不受打扰；你手动禁用的服务器也不会被触碰。扫描链路
+镜像宿主自身的配置链：项目级 `opencode.json(c)` / `.opencode/` 目录
+（除非设置了 `OPENCODE_CONFIG_PROJECT_DISABLE`/`OPENCODE_DISABLE_PROJECT_CONFIG`）、
+`OPENCODE_CONFIG` 指定的文件、全局配置目录（遵循 `OPENCODE_CONFIG_DIR`）
+以及内联的 `OPENCODE_CONFIG_CONTENT`。注意：
 
 - 重连瞬间该服务器上进行中的工具调用可能失败（让 agent 重试即可）；
 - 有状态的 MCP 服务器（如浏览器自动化类）重连后状态丢失 —— 只要它们
@@ -161,10 +166,13 @@ MCP 服务器是长生命周期进程，环境变量在启动时确定，因此�
 - 靠*继承*环境直接读取密钥、没有显式 `{env:...}` 引用的服务器无法被
   精确识别，它们会在下次自然连接时拿到新值；如需覆盖这类服务器，使用
   `mcpReconnect: "all"` 在每次变化时重启所有启用的服务器。
+- 远程组织配置（从 `.well-known/opencode` 拉取）中的引用无法重新解析
+  —— 原始文本不存在于本地。
 
 另外，插件会注册一个永久 transform：每当 OpenCode 重建 MCP 配置时，把
-原始配置文件中找到的所有 `{env:...}` 引用按当前环境重新替换。除了支撑
-热更新，这还修复了服务器**首次连接**可能拿到空替换值的竞态问题。
+原始配置来源中找到的所有 `{env:...}` 引用按当前环境重新替换 —— 包括
+混在同一字符串里的 `{file:...}` 令牌（按宿主的解析方式重新解析）。除了
+支撑热更新，这还修复了服务器**首次连接**可能拿到空替换值的竞态问题。
 
 ## 日志
 

@@ -10,6 +10,7 @@ if (dump) {
   const record = {
     pid: process.pid,
     at: Date.now(),
+    name: process.env.STUB_NAME ?? "stub",
     inherited: process.env.E2E_SECRET ?? null,
     substituted: process.env.STUB_SUBSTITUTED ?? null,
   }

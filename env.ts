@@ -32,10 +32,13 @@ export interface ApplyResult {
 }
 
 /**
- * Resolve the default secrets file location following the XDG Base Directory
- * specification, the same way OpenCode resolves its global config directory.
+ * Resolve the default secrets file location following the host's own global
+ * config directory resolution: OPENCODE_CONFIG_DIR when set, then
+ * $XDG_CONFIG_HOME/opencode, otherwise ~/.config/opencode.
  */
-export function defaultSecretsPath(input: { xdgConfigHome?: string; home?: string } = {}): string {
+export function defaultSecretsPath(input: { xdgConfigHome?: string; home?: string; configDir?: string } = {}): string {
+  const configDir = input.configDir ?? (process.env.OPENCODE_CONFIG_DIR || undefined)
+  if (configDir) return join(configDir, "secrets.env")
   const xdg = input.xdgConfigHome ?? process.env.XDG_CONFIG_HOME
   if (xdg) return join(xdg, "opencode", "secrets.env")
   const home = input.home ?? homedir()

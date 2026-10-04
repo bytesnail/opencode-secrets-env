@@ -95,7 +95,8 @@ background service:
 opencode service restart   # V2; on V1 restart the TUI / server process
 ```
 
-The file location follows the XDG Base Directory spec, like OpenCode itself:
+The file location follows OpenCode's own global config directory resolution:
+`$OPENCODE_CONFIG_DIR/secrets.env` when `OPENCODE_CONFIG_DIR` is set, then
 `$XDG_CONFIG_HOME/opencode/secrets.env` when `XDG_CONFIG_HOME` is set,
 otherwise `~/.config/opencode/secrets.env`.
 
@@ -160,10 +161,14 @@ create `secrets.env` afterwards.
 MCP servers are long-lived processes that received their environment at
 spawn, so after a hot reload the plugin reconnects the affected ones
 (`mcpReconnect`). With the default `true`, "affected" is computed
-precisely: the plugin scans your raw config files for `{env:...}`
+precisely: the plugin scans your raw config sources for `{env:...}`
 references and only reconnects enabled servers that reference one of the
 changed variables — unrelated servers keep running untouched. Servers you
-explicitly disabled are never touched. Caveats:
+explicitly disabled are never touched. The scan mirrors the host's own
+config chain: project `opencode.json(c)` / `.opencode/` directories (unless
+`OPENCODE_CONFIG_PROJECT_DISABLE`/`OPENCODE_DISABLE_PROJECT_CONFIG` is set),
+the `OPENCODE_CONFIG` file, the global config directory
+(`OPENCODE_CONFIG_DIR` honored), and inline `OPENCODE_CONFIG_CONTENT`. Caveats:
 
 - A tool call in flight while its server reconnects may fail (the agent can
   simply retry).
@@ -174,12 +179,17 @@ explicitly disabled are never touched. Caveats:
   explicit `{env:...}` reference cannot be detected this way; they pick up
   new values on their next natural connect, or use `mcpReconnect: "all"`
   to restart every enabled server on each change.
+- References in remote organization config (fetched from
+  `.well-known/opencode`) cannot be re-resolved — the raw text never exists
+  locally.
 
 The plugin also registers a permanent transform that re-resolves every
-`{env:...}` reference found in your raw config files against the live
-environment whenever OpenCode rebuilds its MCP configuration. Besides hot
-reloads, this fixes a race where a server's *first* connection could
-otherwise start with empty substituted values.
+`{env:...}` reference found in your raw config sources against the live
+environment whenever OpenCode rebuilds its MCP configuration — including
+`{file:...}` tokens mixed into the same string, which are re-resolved the
+way the host resolves them. Besides hot reloads, this fixes a race where a
+server's *first* connection could otherwise start with empty substituted
+values.
 
 ## Logging
 
