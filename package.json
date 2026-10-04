@@ -1,8 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "opencode-secrets-env",
-  "version": "0.4.5",
-  "description": "OpenCode plugin that injects secrets from ~/.config/opencode/secrets.env into process.env at startup, so MCP servers and other plugins can reference them with {env:...}",
+  "version": "0.4.6",
+  "description": "OpenCode plugin that injects secrets from ~/.config/opencode/secrets.env into process.env at startup, hot-reloads them on change, and reconnects MCP servers so they pick up new values",
   "type": "module",
   "exports": {
     ".": "./index.ts"

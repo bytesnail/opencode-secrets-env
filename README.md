@@ -133,7 +133,7 @@ works on both V1 and V2 hosts:
 
 | Option     | Type       | Default | Description |
 | ---------- | ---------- | ------- | ----------- |
-| `path`     | `string`   | `~/.config/opencode/secrets.env` | Custom secrets file. Supports `~` and relative paths (resolved against the project directory). |
+| `path`     | `string`   | `~/.config/opencode/secrets.env` | Custom secrets file. Supports `~` (also `~\` on Windows) and relative paths (resolved against the project directory). |
 | `override` | `boolean`  | `false` | Overwrite variables that already exist in the real environment. By default the real environment always wins. |
 | `required` | `string[]` | `[]`    | Variables that must exist after loading. A warning is logged for each missing one. |
 | `watch`    | `boolean`  | `true`  | Watch the secrets file and hot-reload `process.env` when it changes (see below). |
@@ -191,6 +191,19 @@ way the host resolves them. Besides hot reloads, this fixes a race where a
 server's *first* connection could otherwise start with empty substituted
 values.
 
+A hot reload updates `process.env` in place, so in-process consumers — other
+plugins and OpenCode's own environment-based provider key discovery — see new
+values the next time they read them. Two audiences a hot reload cannot reach:
+
+- Plugins that captured a variable into a local constant or an SDK client in
+  their `setup()` keep the old value. There is no plugin API to re-run their
+  setup, so the ordering rule (this plugin first in the `plugin` array) only
+  fixes startup timing.
+- `{env:...}` references outside the MCP config (e.g.
+  `provider.*.options.apiKey`). The host substitutes them when it loads the
+  config, but the permanent transform above only covers MCP, so those
+  positions refresh on the host's next config reload or service restart.
+
 ## Logging
 
 The OpenCode background service runs detached, so plugin console output is
@@ -204,7 +217,9 @@ invisible. This plugin therefore also appends to its own log file:
 
 Only counts and key *names* are ever logged — never secret values. The log
 rotates at ~256 KB, keeping one previous generation
-(`opencode-secrets-env.log.old`).
+(`opencode-secrets-env.log.old`). When a variable does not seem to take
+effect, this log is the first place to look; enable the `debug` option for
+key-level detail.
 
 ## Notes & security
 
@@ -215,7 +230,8 @@ rotates at ~256 KB, keeping one previous generation
   automatically within a second. With `watch: false`, restart OpenCode after
   editing (`opencode service restart` on V2).
 - **Permissions**: keep the file at `chmod 600`. The plugin warns when it is
-  readable by other users.
+  readable by other users (the check is POSIX-only — on Windows, restrict
+  access with NTFS ACLs instead).
 - **No project-level auto-loading**: only your global file (or an explicitly
   configured `path`) is read, so a cloned repository cannot smuggle variables
   into your environment.
