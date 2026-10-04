@@ -17,6 +17,12 @@ on:
   push:
     tags: ["v*"]
 
+# Least privilege (OpenSSF Token-Permissions): guard/ci only read the repo;
+# the publish job re-elevates explicitly (contents: write for the GitHub
+# Release, id-token: write for the npm OIDC exchange).
+permissions:
+  contents: read
+
 concurrency:
   group: release
   cancel-in-progress: false
@@ -27,7 +33,7 @@ jobs:
     outputs:
       version: ${{ steps.check.outputs.version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - id: check
         run: |
           tag="${GITHUB_REF_NAME}"
@@ -62,8 +68,8 @@ jobs:
       contents: write # gh release create
       id-token: write # npm trusted publishing / provenance (OIDC)
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           # Node 24 bundles npm >= 11.5.1, the trusted-publishing floor.
           node-version: "24"

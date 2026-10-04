@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Keeps the SHA-pinned actions in .github/workflows current — dependabot
+  # updates both the pin and the trailing version comment. (Also what
+  # OpenSSF Scorecard's Dependency-Update-Tool check looks for.)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  # npm is deliberately absent: the lockfile's resolved hosts are normalized
+  # to npmmirror on the maintainer machine, which dependabot PRs would rewrite
+  # to registry.npmjs.org. The two runtime deps (deliberately minimal — they
+  # install into the user's host) are bumped by hand.
