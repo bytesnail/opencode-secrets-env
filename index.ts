@@ -19,6 +19,8 @@ export interface NormalizedOptions {
   path?: string
   override: boolean
   watch: boolean
+  /** mtime poll safety net backing the event watcher (gated by `watch`); 0 disables. */
+  pollIntervalMs: number
   /** true = servers referencing changed keys, "all" = every enabled server, string[] = only these, false = none. */
   mcpReconnect: McpReconnectOption
   quiet: boolean
@@ -37,6 +39,12 @@ export function normalizeOptions(raw: Record<string, unknown> | undefined): Norm
     path: typeof options.path === "string" && options.path.trim().length > 0 ? options.path.trim() : undefined,
     override: options.override === true,
     watch: options.watch !== false,
+    pollIntervalMs:
+      typeof options.pollIntervalMs === "number" &&
+      Number.isFinite(options.pollIntervalMs) &&
+      options.pollIntervalMs >= 0
+        ? Math.floor(options.pollIntervalMs)
+        : 5000,
     mcpReconnect: Array.isArray(options.mcpReconnect)
       ? options.mcpReconnect.filter((name): name is string => typeof name === "string" && name.length > 0)
       : options.mcpReconnect === "all"
@@ -132,6 +140,9 @@ interface FileState {
   instances: Set<Instance>
   watcher?: FSWatcher
   timer?: ReturnType<typeof setTimeout>
+  pollTimer?: ReturnType<typeof setInterval>
+  /** File signature as of the last successful apply — the poll net's baseline. */
+  applied?: { exists: boolean; mtimeMs: number }
   busy: boolean
   queued: boolean
 }
@@ -149,6 +160,20 @@ function stateFor(file: string): FileState {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * What the poll net compares: existence + mtime. Callers take the signature
+ * BEFORE reading so a write landing mid-read records the older signature —
+ * the next poll tick then schedules one extra (harmless, diffed) reload
+ * instead of missing the update.
+ */
+function fileSignature(file: string): { exists: boolean; mtimeMs: number } {
+  try {
+    return { exists: true, mtimeMs: statSync(file).mtimeMs }
+  } catch {
+    return { exists: false, mtimeMs: 0 }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +221,7 @@ function checkRequired(instance: Instance): void {
 function loadOnce(instance: Instance, context: string): ReturnType<SecretsStore["apply"]> {
   const { file, options, emit } = instance
   const state = stateFor(file)
+  const signature = fileSignature(file)
   const read = readSecrets(file)
 
   if (read.error) {
@@ -205,6 +231,7 @@ function loadOnce(instance: Instance, context: string): ReturnType<SecretsStore[
   }
   if (!read.found) {
     const result = state.store.apply({}, options)
+    state.applied = signature
     if (result.added.length + result.updated.length + result.removed.length === 0) {
       emit("info", `${context}: no secrets file at ${file}, skipping`)
     } else {
@@ -218,6 +245,7 @@ function loadOnce(instance: Instance, context: string): ReturnType<SecretsStore[
   }
 
   const result = state.store.apply(read.parsed, options)
+  state.applied = signature
   report(emit, file, result, context, Object.keys(read.parsed).length)
   checkRequired(instance)
   return result
@@ -337,6 +365,43 @@ function scheduleReload(state: FileState, file: string): void {
   }, 300)
 }
 
+/**
+ * Event-driven watchers can silently drop events — FSEvents does exactly
+ * that under load (observed 2026-10-04 on macOS CI: no event within 60 s).
+ * Back the watcher with a low-frequency mtime poll so a dropped event
+ * degrades to a few seconds' delay instead of a permanently missed reload.
+ * One stat per interval; unref'd like the watcher, so it never keeps the
+ * host process alive.
+ */
+function ensurePollNet(instance: Instance): void {
+  if (!instance.options.watch) return
+  const interval = instance.options.pollIntervalMs
+  if (interval <= 0) return
+  const state = stateFor(instance.file)
+  if (state.pollTimer) return
+  const timer = setInterval(() => {
+    // A pending debounce or an in-flight reload already covers the latest
+    // file content — re-arming here would starve the debounce whenever the
+    // poll interval is shorter than the debounce (and keep the event loop
+    // alive forever).
+    if (state.timer !== undefined || state.busy) return
+    const signature = fileSignature(instance.file)
+    const applied = state.applied
+    if (applied === undefined) {
+      // Never applied successfully (e.g. a read error at startup): take the
+      // current signature as the baseline and retry once per observed
+      // signature, so an unreadable file warns at most once per change.
+      state.applied = signature
+      if (signature.exists) scheduleReload(state, instance.file)
+      return
+    }
+    if (applied.exists === signature.exists && applied.mtimeMs === signature.mtimeMs) return
+    scheduleReload(state, instance.file)
+  }, interval)
+  timer.unref()
+  state.pollTimer = timer
+}
+
 function ensureWatcher(instance: Instance): void {
   if (!instance.options.watch) return
   const state = stateFor(instance.file)
@@ -408,6 +473,7 @@ function dropWatcherAndStore(file: string): void {
   const state = files.get(file)
   if (!state || state.instances.size > 0) return
   if (state.timer) clearTimeout(state.timer)
+  if (state.pollTimer) clearInterval(state.pollTimer)
   state.watcher?.close()
   const released = state.store.release()
   if (released.length > 0) {
@@ -479,6 +545,7 @@ function activate(options: NormalizedOptions, directory: string, mcp?: McpLike):
   // Watch before the initial load so an edit landing between the two is not
   // missed (the debounced reload picks it up).
   ensureWatcher(instance)
+  ensurePollNet(instance)
   loadOnce(instance, "startup")
 
   const envRefTransform = registerEnvRefTransform(instance)

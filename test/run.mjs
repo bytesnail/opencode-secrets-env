@@ -32,8 +32,16 @@ const defaultFiles = [
   "test/changelog.test.ts",
 ]
 const files = process.argv.slice(2)
-const result = spawnSync(process.execPath, ["--test", ...(files.length > 0 ? files : defaultFiles)], {
-  stdio: "inherit",
-})
+// --experimental-test-module-mocks: enables t.mock.module (node:test module
+// mocking), used by the poll-net test in index.test.ts to stub fs.watch.
+// Available since 22.3, still gated in 24 — so it is required on the whole
+// supported range. Only affects the unit suite.
+const result = spawnSync(
+  process.execPath,
+  ["--experimental-test-module-mocks", "--test", ...(files.length > 0 ? files : defaultFiles)],
+  {
+    stdio: "inherit",
+  },
+)
 if (result.error) throw result.error
 process.exit(result.status ?? 1)
