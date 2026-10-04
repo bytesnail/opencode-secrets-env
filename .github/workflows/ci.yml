@@ -72,3 +72,17 @@ jobs:
           OPENCODE_E2E_V1_SPEC: opencode-ai@latest
           OPENCODE_E2E_V2_SPEC: "@opencode/cli@latest"
         run: node test/e2e/run.mjs --host ${{ matrix.host }}
+
+  # Branch-ruleset gate: one stable check context that aggregates the whole
+  # matrix, so the "protect main" ruleset requires a single name instead of
+  # enumerating matrix cells (which would silently drift on matrix changes).
+  # Keep the job id `gate` stable, or update the ruleset in the same PR.
+  gate:
+    if: always()
+    needs: [test, e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "test: ${{ needs.test.result }}"
+          echo "e2e:  ${{ needs.e2e.result }}"
+          [ "${{ needs.test.result }}" = success ] && [ "${{ needs.e2e.result }}" = success ]

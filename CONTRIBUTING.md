@@ -57,6 +57,11 @@ enough for most PRs — CI does the rest.
 
 ## Pull requests
 
+`main` is PR-gated for everyone, admins included — direct pushes are
+rejected by the `protect main` ruleset. A merge needs the required checks
+green (`gate`, the ci.yml matrix aggregate, plus `analyze` from CodeQL) on
+an up-to-date branch; squash and merge commits are both accepted.
+
 - One concern per PR; describe the user-visible behavior change.
 - Update both READMEs when user-facing behavior or options change.
 - Add or adjust unit tests for logic changes; e2e coverage for
