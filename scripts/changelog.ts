@@ -3,8 +3,10 @@
 // bumps package.json and then runs this: CHANGELOG.md's [Unreleased] section
 // becomes a dated section for the new version — entries already curated
 // under [Unreleased] are carried over verbatim, then the conventional
-// commits since the previous tag are appended as draft entries — and the
-// link definitions at the bottom are refreshed. The file is left staged
+// commits since the previous tag are appended as draft entries
+// (deduplicated: a commit whose text already appears as a curated line, or
+// repeats an earlier commit's subject, is dropped) — and the link
+// definitions at the bottom are refreshed. The file is left staged
 // (see the `version` script in package.json); review/trim the generated
 // entries before committing `chore: release vX.Y.Z`.
 //
@@ -54,6 +56,18 @@ export function classify(subject: string): { bucket: string; text: string } | nu
   return null
 }
 
+// Normalizes a changelog bullet for deduplication: drops the leading "- "
+// and any trailing commit-hash annotation, trailing punctuation, and case —
+// so a curated "- Plug leak." matches the generated "- Plug leak (`aaa1111`)",
+// and two commits sharing a subject collapse into one entry.
+export function dedupeKey(entry: string): string {
+  return entry
+    .replace(/^- /, "")
+    .replace(/\s*\((`[0-9a-f]+`(, )?)+\)\.?$/i, "")
+    .replace(/[\s.]+$/, "")
+    .toLowerCase()
+}
+
 // Merges generated bucket items into the curated section: buckets whose
 // `### <Name>` heading already exists get their items appended in place;
 // the rest become new subsections (in BUCKETS order) after the curated text.
@@ -100,10 +114,20 @@ export function renderChangelog(text: string, opts: RenderOptions): string | nul
   if (nextAt < 0) nextAt = text.length
   const curated = text.slice(headingEnd, nextAt).trim()
 
+  // Dedupe: seed the seen-set with the curated bullets, then keep only the
+  // first generated entry per normalized text (commits arrive oldest-first).
+  const seen = new Set<string>()
+  for (const line of curated.split("\n")) {
+    const bullet = line.trimStart()
+    if (bullet.startsWith("- ")) seen.add(dedupeKey(bullet))
+  }
   const byBucket = new Map<string, string[]>()
   for (const { hash, subject } of commits) {
     const c = classify(subject)
     if (!c) continue
+    const key = dedupeKey(c.text)
+    if (seen.has(key)) continue
+    seen.add(key)
     let items = byBucket.get(c.bucket)
     if (!items) {
       items = []

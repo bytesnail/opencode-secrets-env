@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { classify, renderChangelog } from "../scripts/changelog.ts"
+import { classify, dedupeKey, renderChangelog } from "../scripts/changelog.ts"
 
 const REPO = "https://github.com/example/repo"
 
@@ -70,6 +70,40 @@ test("renderChangelog carries curated entries, appends buckets, refreshes links"
   assert.match(out, /\[Unreleased\]: https:\/\/github\.com\/example\/repo\/compare\/v0\.5\.1\.\.\.HEAD/)
   assert.match(out, /\[0\.5\.1\]: https:\/\/github\.com\/example\/repo\/compare\/v0\.5\.0\.\.\.v0\.5\.1/)
   assert.match(out, /\[0\.4\.5\]: https:\/\/github\.com\/example\/repo\/compare\/v0\.4\.4\.\.\.v0\.4\.5/)
+})
+
+test("dedupeKey normalizes bullets, hashes, punctuation and case", () => {
+  assert.equal(dedupeKey("- Plug leak (`aaa1111`)"), "plug leak")
+  assert.equal(dedupeKey("- Plug leak (`aaa1111`, `bbb2222`)."), "plug leak")
+  assert.equal(dedupeKey("- Plug Leak."), "plug leak")
+  assert.equal(dedupeKey("Plug leak"), "plug leak")
+  assert.notEqual(dedupeKey("- Add flag"), dedupeKey("- Add flag validation"))
+})
+
+test("renderChangelog drops generated entries duplicating curated lines or earlier commits", () => {
+  const out = renderChangelog(FIXTURE, {
+    version: "0.5.1",
+    date: "2026-10-05",
+    prevTag: "v0.5.0",
+    repoUrl: REPO,
+    commits: [
+      // Same text as the curated Fixed line (curated has no hash, ends with ".").
+      { hash: "aaa1111", subject: "fix: a hand-curated entry already written during development" },
+      // Same subject twice: only the first (oldest) survives.
+      { hash: "bbb2222", subject: "fix: plug leak" },
+      { hash: "ccc3333", subject: "fix: plug leak" },
+      // Same text under a different bucket is still a duplicate.
+      { hash: "ddd4444", subject: "feat: plug leak" },
+      // Merely sharing a prefix is not a duplicate.
+      { hash: "eee5555", subject: "fix: plug leak detection" },
+    ],
+  })
+  assert.ok(out)
+  assert.equal(out.match(/hand-curated entry/g)?.length, 1, "curated entry not duplicated")
+  assert.equal(out.match(/- Plug leak \(`bbb2222`\)/g)?.length, 1, "first occurrence kept")
+  assert.ok(!out.includes("ccc3333"), "second same-subject commit dropped")
+  assert.ok(!out.includes("ddd4444"), "cross-bucket duplicate dropped")
+  assert.ok(out.includes("- Plug leak detection (`eee5555`)"), "prefix-only lookalike kept")
 })
 
 test("renderChangelog is a no-op when the version section exists", () => {
