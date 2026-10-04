@@ -223,35 +223,8 @@ OpenCode 后台服务的标准输出不可见，因此插件额外写入自己�
 
 ## 开发
 
-```sh
-npm install
-npm run typecheck
-npm test              # 单元测试（node --test）
-npm run test:e2e      # 真实宿主端到端测试（先 v2 后 v1）
-npm run test:e2e:v1   # 只对 opencode-ai（V1 宿主）运行
-npm run test:e2e:v2   # 只对 @opencode/cli（V2 宿主）运行
-```
-
 本包以 TypeScript 源码形式发布（OpenCode 直接加载插件），没有构建步骤。
-插件入口是包根目录的 `index.ts`；`env.ts` 是纯加载逻辑，`rawconfig.ts`
-负责原始配置扫描（扁平的 V1 `mcp.<名字>` 与嵌套的 V2 `mcp.servers.<名字>`
-两种形状）。全部逻辑都有 `node --test` 单元测试覆盖，包括通过 V1 入口的
-端到端用例，以及用 fake MCP 域覆盖 env 引用重替换与精确重连的 V2
-`setup()` 用例。
-
-`test/e2e/run.mjs` 更进一步，针对真实宿主测试：用 `npm pack` 打包插件并
-安装，安装锁定的宿主 CLI（`opencode-ai` / `@opencode/cli`），在隔离的
-`HOME`/`XDG_*`/`OPENCODE_TEST_HOME` 沙箱中启动，断言完整链路 —— 插件
-加载、密钥注入、stub MCP 服务器带着变量启动、热更新以及（V2）重连循环。
-宿主版本锁定在该文件顶部，需有意识地升级。
-
-锁定版本跟踪最新稳定版宿主。`package.json` 的 `engines.opencode` 下限是
-通过该 e2e 的最旧 V1 版本 —— 1.14.34，即 `mcp list` 进程内引导重构
-（anomalyco/opencode#25521）首次发布的版本；更早的 V1 版本注入与热更新
-正常，但 `mcp list` 路径不会加载插件，经该路径启动的 MCP 进程拿不到注入
-的变量。可用
-`OPENCODE_E2E_V1_SPEC=opencode-ai@<版本> node test/e2e/run.mjs --host v1`
-重新探测。
+环境搭建、测试命令与家规见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
 开发时引用本地检出目录即可加载本插件：
 

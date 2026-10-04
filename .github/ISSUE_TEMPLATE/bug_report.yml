@@ -21,7 +21,7 @@ body:
     attributes:
       label: Versions
       description: Plugin version, host + version, OS
-      placeholder: "plugin 0.5.0 · @opencode/cli 2.0.22 · macOS 15"
+      placeholder: "plugin 0.5.0 · @opencode/cli 2.0.22 · Ubuntu 24.04"
     validations:
       required: true
   - type: textarea

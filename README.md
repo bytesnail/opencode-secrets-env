@@ -250,39 +250,9 @@ key-level detail.
 
 ## Development
 
-```sh
-npm install
-npm run typecheck
-npm test              # unit tests (node --test)
-npm run test:e2e      # real-host end-to-end tests (v2 then v1)
-npm run test:e2e:v1   # only against opencode-ai (V1 host)
-npm run test:e2e:v2   # only against @opencode/cli (V2 host)
-```
-
 The package is published as TypeScript source (OpenCode loads plugins
-directly), so there is no build step. The plugin entry point is `index.ts` at
-the package root; `env.ts` holds the pure loading logic and `rawconfig.ts`
-the raw-config scanning (both the flat V1 `mcp.<name>` and the nested V2
-`mcp.servers.<name>` shapes). Everything is unit tested with `node --test`,
-including an end-to-end pass through the V1 entry point and a V2 pass
-through `setup()` with a fake MCP domain covering env-ref substitution and
-precise reconnection.
-
-`test/e2e/run.mjs` goes further and tests against the real hosts: it packs
-the plugin with `npm pack`, installs it, installs the pinned host CLI
-(`opencode-ai` / `@opencode/cli`), boots it with an isolated
-`HOME`/`XDG_*`/`OPENCODE_TEST_HOME` sandbox and asserts the full chain —
-plugin load, secrets injection, a stub MCP server spawned with the values,
-hot reload and (on V2) the reconnect cycle. Host versions are pinned at the
-top of the file; bump them deliberately.
-
-The pins track the latest stable hosts. The `engines.opencode` floor in
-`package.json` is the oldest V1 release passing the harness — 1.14.34, where
-the `mcp list` in-process bootstrap refactor (anomalyco/opencode#25521) first
-shipped; older V1 releases inject and hot-reload fine but do not load
-plugins on the `mcp list` path, so MCP processes spawned there miss the
-injected variables. Re-probe with
-`OPENCODE_E2E_V1_SPEC=opencode-ai@<version> node test/e2e/run.mjs --host v1`.
+directly), so there is no build step. Setup, test commands and house rules
+live in [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 To load a local checkout while developing, reference the directory:
 

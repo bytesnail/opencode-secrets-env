@@ -17,9 +17,9 @@ npm test             # unit tests (node --test on TS sources)
 npm run test:e2e     # real-host e2e: downloads pinned V1+V2 hosts (~100MB each), takes minutes
 ```
 
-CI runs the full matrix (ubuntu + windows × node 22.18/24 × unit/e2e against
-both hosts), so a green local `typecheck` + `test` is enough for most PRs —
-CI does the rest.
+CI runs the full matrix (ubuntu + windows + macOS × node 22.18/24 ×
+unit/e2e against both hosts), so a green local `typecheck` + `test` is
+enough for most PRs — CI does the rest.
 
 ## House rules (these have bitten before)
 

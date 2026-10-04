@@ -1,7 +1,8 @@
 name: Release
 
 # CI-gated publishing: pushing a v<version> tag replays the full CI matrix
-# (unit + real-host e2e, ubuntu + windows) and only then publishes to npm and
+# (unit + real-host e2e, ubuntu + windows + macOS) and only then publishes to
+# npm and
 # creates the GitHub Release. npm authenticates this workflow via trusted
 # publishing (OIDC) — there is deliberately no NPM_TOKEN, so only this
 # workflow can publish and local `npm publish` fails by design.
@@ -48,8 +49,8 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-  # The exact matrix every PR runs: unit tests on ubuntu+windows × node
-  # 22.18/24, then real-host e2e on ubuntu+windows × v1/v2.
+  # The exact matrix every PR runs: unit tests on ubuntu+windows+macOS ×
+  # node 22.18/24, then real-host e2e on the same OSes × v1/v2.
   ci:
     needs: guard
     uses: ./.github/workflows/ci.yml
