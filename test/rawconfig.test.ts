@@ -520,8 +520,9 @@ test("makeRefScanner memoizes until a config source appears or changes", () => {
 test("makeRefScanner rescans when the inline content changes", () => {
   withTempDir((dir) => {
     let content = ""
-    const input: ScanEnvironment = {}
-    // Read the mutable variable like the real environment read does.
+    // Hermetic like every other scan test; only configContent is a live
+    // getter, to mimic the real environment read.
+    const input = scanInput(dir)
     Object.defineProperty(input, "configContent", { get: () => content, enumerable: true })
     const scanner = makeRefScanner(dir, input)
 
