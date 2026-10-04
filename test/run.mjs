@@ -29,6 +29,7 @@ const defaultFiles = [
   "test/options.test.ts",
   "test/index.test.ts",
   "test/mcp.test.ts",
+  "test/changelog.test.ts",
 ]
 const files = process.argv.slice(2)
 const result = spawnSync(process.execPath, ["--test", ...(files.length > 0 ? files : defaultFiles)], {

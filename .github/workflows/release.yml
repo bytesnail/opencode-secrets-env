@@ -39,6 +39,13 @@ jobs:
             echo "::error::opencode-secrets-env@$version is already on npm — bump the version first"
             exit 1
           fi
+          # The changelog entry is produced by the `version` lifecycle script
+          # (scripts/changelog.ts) during `npm version` — its absence means
+          # the release flow was bypassed.
+          if ! grep -qF "## [$version]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [$version]' section — run npm version ... so the changelog entry is generated"
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
   # The exact matrix every PR runs: unit tests on ubuntu+windows × node
@@ -65,7 +72,16 @@ jobs:
       # trusted-publisher exchange when no token is present.
       - run: npm ci
       - run: npm publish --provenance
-      - run: gh release create "${{ github.ref_name }}" --generate-notes --verify-tag
+      # Release notes = the version's CHANGELOG.md section + its compare
+      # link (parsed from the link definitions, so no git history needed).
+      - name: Build release notes from CHANGELOG.md
+        run: |
+          v="${{ needs.guard.outputs.version }}"
+          awk -v sec="## [$v]" 'insec && /^## \[/ {exit} insec==0 && index($0, sec)==1 {insec=1; next} insec {print}' CHANGELOG.md \
+            | sed -e '/./,$!d' > notes.md
+          url="$(grep -m1 -oP "^\[\Q$v\E\]: \K.+" CHANGELOG.md || true)"
+          printf '\n**Full Changelog**: %s\n' "${url:-https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}}" >> notes.md
+      - run: gh release create "${{ github.ref_name }}" --notes-file notes.md --verify-tag
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Verify the new version is visible on npm

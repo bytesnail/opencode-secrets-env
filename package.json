@@ -19,6 +19,7 @@
     "test:e2e:v1": "node test/e2e/run.mjs --host v1",
     "test:e2e:v2": "node test/e2e/run.mjs --host v2",
     "typecheck": "tsc --noEmit",
+    "version": "node scripts/changelog.ts && git add CHANGELOG.md",
     "prepublishOnly": "npm run typecheck && npm test"
   },
   "keywords": [
