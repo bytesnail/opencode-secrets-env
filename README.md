@@ -5,6 +5,7 @@
 [![npm](https://img.shields.io/npm/v/opencode-secrets-env)](https://www.npmjs.com/package/opencode-secrets-env)
 [![CI](https://github.com/bytesnail/opencode-secrets-env/actions/workflows/ci.yml/badge.svg)](https://github.com/bytesnail/opencode-secrets-env/actions/workflows/ci.yml)
 [![npm downloads](https://img.shields.io/npm/dm/opencode-secrets-env)](https://www.npmjs.com/package/opencode-secrets-env)
+[![platforms: Linux · macOS · Windows](https://img.shields.io/badge/platforms-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-informational)](https://github.com/bytesnail/opencode-secrets-env/actions/workflows/ci.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
 An [OpenCode](https://opencode.ai) plugin that loads secrets from
@@ -22,6 +23,9 @@ to a dotfiles repo without leaking keys.
 ![Demo: rotating a key in `secrets.env` — the running OpenCode service reloads it and reconnects the affected MCP server in about a second, no restart](./.github/assets/demo.gif)
 
 ## Install
+
+Tested on Linux, macOS and Windows — CI runs unit tests and real-host
+end-to-end tests on all three, against both OpenCode V1 and V2 hosts.
 
 OpenCode V2 (`@opencode/cli` 2.x):
 
