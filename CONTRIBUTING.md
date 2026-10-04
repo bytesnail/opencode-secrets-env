@@ -60,7 +60,11 @@ enough for most PRs — CI does the rest.
 `main` is PR-gated for everyone, admins included — direct pushes are
 rejected by the `protect main` ruleset. A merge needs the required checks
 green (`gate`, the ci.yml matrix aggregate, plus `analyze` from CodeQL) on
-an up-to-date branch; squash and merge commits are both accepted.
+an up-to-date branch; no approval is required (solo project). Squash and
+merge commits are both accepted — but write the **PR title as a
+conventional-commit subject**: a squash merge makes the title the landed
+commit's subject, which is what release changelog drafts are generated
+from.
 
 - One concern per PR; describe the user-visible behavior change.
 - Update both READMEs when user-facing behavior or options change.
