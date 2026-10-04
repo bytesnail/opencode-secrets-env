@@ -18,6 +18,8 @@
 
 密钥因此不必写进 `opencode.json(c)`，配置可以安全提交到 dotfiles 仓库而不泄露。
 
+![演示：轮换 `secrets.env` 中的密钥 —— 运行中的 OpenCode 服务约一秒内热加载，并自动重连受影响的 MCP 服务器，无需重启](./.github/assets/demo.gif)
+
 ## 安装
 
 OpenCode V2（`@opencode/cli` 2.x）：

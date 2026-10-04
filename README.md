@@ -19,6 +19,8 @@ The injected variables can then be used by:
 Secrets stay out of `opencode.json(c)`, so your configuration can be committed
 to a dotfiles repo without leaking keys.
 
+![Demo: rotating a key in `secrets.env` — the running OpenCode service reloads it and reconnects the affected MCP server in about a second, no restart](./.github/assets/demo.gif)
+
 ## Install
 
 OpenCode V2 (`@opencode/cli` 2.x):
