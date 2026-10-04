@@ -1,0 +1,47 @@
+name: Bug report
+description: Something is not working as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! 中文填写也完全可以。
+
+        **Never paste real secret values** — redact them. The plugin never
+        logs values, so its log file is safe to quote.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: And what did you expect instead?
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Plugin version, host + version, OS
+      placeholder: "plugin 0.4.5 · @opencode/cli 2.0.22 · macOS 15"
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Include the relevant opencode.json(c) snippet with all secrets redacted
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log excerpt
+      description: |
+        From `~/.local/share/opencode/log/opencode-secrets-env.log`
+        (check `opencode-secrets-env.log.old` too — the log rotates at ~256 KB).
+        Enable the plugin's `debug` option for key-level detail.
+      render: text
+    validations:
+      required: false

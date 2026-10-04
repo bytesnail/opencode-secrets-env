@@ -3,6 +3,9 @@
 [![English](https://img.shields.io/badge/lang-English-blue)](./README.md)
 [![简体中文](https://img.shields.io/badge/lang-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-red)](./README.zh-CN.md)
 [![npm](https://img.shields.io/npm/v/opencode-secrets-env)](https://www.npmjs.com/package/opencode-secrets-env)
+[![CI](https://github.com/bytesnail/opencode-secrets-env/actions/workflows/ci.yml/badge.svg)](https://github.com/bytesnail/opencode-secrets-env/actions/workflows/ci.yml)
+[![npm downloads](https://img.shields.io/npm/dm/opencode-secrets-env)](https://www.npmjs.com/package/opencode-secrets-env)
+[![license: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
 一个 [OpenCode](https://opencode.ai) 插件：在 OpenCode 启动时，把
 `~/.config/opencode/secrets.env` 中的密钥加载进 `process.env`。
