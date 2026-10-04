@@ -227,7 +227,10 @@ test("server() rotates the plugin log when it grows past the cap", async () => {
   })
 })
 
-async function waitFor(condition: () => boolean, timeoutMs = 5000): Promise<void> {
+// 15 s ceiling, not 5: fast platforms return as soon as the 50 ms poll sees
+// the condition, so the ceiling only matters on slow ones — fs.watch on
+// macOS (FSEvents) can take several seconds to deliver on a loaded CI runner.
+async function waitFor(condition: () => boolean, timeoutMs = 15000): Promise<void> {
   const start = Date.now()
   while (!condition()) {
     if (Date.now() - start > timeoutMs) throw new Error("timed out waiting for the hot reload")
