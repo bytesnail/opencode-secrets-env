@@ -38,7 +38,7 @@
   "bugs": {
     "url": "https://github.com/bytesnail/opencode-secrets-env/issues"
   },
-  "homepage": "https://github.com/bytesnail/opencode-secrets-env#readme",
+  "homepage": "https://github.com/bytesnail/opencode-secrets-env",
   "engines": {
     "node": ">=22.18",
     "opencode": ">=1.14.34"
