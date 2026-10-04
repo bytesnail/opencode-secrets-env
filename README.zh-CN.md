@@ -263,6 +263,8 @@ npm run test:e2e:v2   # 只对 @opencode/cli（V2 宿主）运行
 }
 ```
 
+发布历史见 [CHANGELOG.md](./CHANGELOG.md)。
+
 ## 许可证
 
 [MIT](./LICENSE)

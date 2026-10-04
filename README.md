@@ -294,6 +294,8 @@ To load a local checkout while developing, reference the directory:
 }
 ```
 
+Release history lives in [CHANGELOG.md](./CHANGELOG.md).
+
 ## License
 
 [MIT](./LICENSE)
