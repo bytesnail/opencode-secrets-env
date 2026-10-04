@@ -141,6 +141,7 @@ EMPTY=
 | `override` | `boolean`  | `false` | 覆盖真实环境中已存在的变量。默认真实环境优先。 |
 | `required` | `string[]` | `[]`    | 加载后必须存在的变量名，每个缺失的变量都会记录一条警告。 |
 | `watch`    | `boolean`  | `true`  | 监听密钥文件变化并热更新 `process.env`（见下文）。 |
+| `pollIntervalMs` | `number` | `5000`  | 文件监听器兜底的 mtime 轮询间隔（仅 `watch` 开启时生效）。操作系统事件是快速路径；轮询负责治愈丢失的事件——FSEvents 在高负载下会丢事件，否则这次热更新将被彻底错过，直到重启。每个间隔一次 stat；`0` 关闭兜底（不推荐）。 |
 | `mcpReconnect` | `boolean \| "all" \| string[]` | `true` | 热更新后重连 MCP 服务器使其拿到新值。`true` = 仅重连配置中引用了变化变量的服务器（精确按需），`"all"` = 所有启用的服务器，`["名字"]` = 仅指定服务器，`false` = 从不重连。 |
 | `quiet`    | `boolean`  | `false` | 静默 info/debug 日志（警告始终输出）。 |
 | `debug`    | `boolean`  | `false` | 额外记录注入/跳过的**键名**（值永不记录）。 |
@@ -148,7 +149,9 @@ EMPTY=
 ## 热更新
 
 `watch` 开启时（默认），编辑 `secrets.env` 后约 1 秒内生效，无需
-`opencode service restart`：
+`opencode service restart`。监听器是事件驱动的，并配有低频 mtime 轮询
+兜底（默认 5 秒）：如果操作系统丢了监听事件（FSEvents 在高负载下会丢），
+改动仍会在一个轮询间隔内落地，而不是被错过直到下次重启：
 
 - **新增的 key** 注入运行中服务的 `process.env`；
 - **修改的 key** 原地更新 —— 但只更新插件自己注入的 key，来自真实 shell

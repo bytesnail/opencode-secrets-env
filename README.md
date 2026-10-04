@@ -146,6 +146,7 @@ works on both V1 and V2 hosts:
 | `override` | `boolean`  | `false` | Overwrite variables that already exist in the real environment. By default the real environment always wins. |
 | `required` | `string[]` | `[]`    | Variables that must exist after loading. A warning is logged for each missing one. |
 | `watch`    | `boolean`  | `true`  | Watch the secrets file and hot-reload `process.env` when it changes (see below). |
+| `pollIntervalMs` | `number` | `5000`  | Interval of the mtime poll backing the file watcher (only with `watch` on). OS watch events are the fast path; the poll heals dropped events — FSEvents can drop them under load, which would otherwise miss the reload entirely. One stat per interval; `0` disables the net (not recommended). |
 | `mcpReconnect` | `boolean \| "all" \| string[]` | `true` | After a hot reload, reconnect MCP servers so they pick up new values. `true` = only servers whose config references a changed variable (precise), `"all"` = every enabled server, `["name"]` = only those servers, `false` = never. |
 | `quiet`    | `boolean`  | `false` | Silence info/debug messages (warnings are always shown). |
 | `debug`    | `boolean`  | `false` | Also log the *names* of applied/skipped keys. Values are never logged. |
@@ -153,7 +154,10 @@ works on both V1 and V2 hosts:
 ## Hot reload
 
 When `watch` is enabled (the default), editing `secrets.env` takes effect
-within about a second — no `opencode service restart` needed:
+within about a second — no `opencode service restart` needed. The watcher is
+event-driven, backed by a low-frequency mtime poll (default 5 s): if the OS
+drops a watch event — FSEvents can, under load — the change still lands
+within one poll interval instead of being missed until the next restart:
 
 - **Added keys** are injected into the running service's `process.env`.
 - **Changed keys** are updated in place — but only keys the plugin itself

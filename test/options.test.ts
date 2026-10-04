@@ -7,6 +7,7 @@ test("normalizeOptions applies defaults for missing input", () => {
     path: undefined,
     override: false,
     watch: true,
+    pollIntervalMs: 5000,
     mcpReconnect: true,
     quiet: false,
     debug: false,
@@ -21,6 +22,7 @@ test("normalizeOptions passes through well-typed values", () => {
       path: "~/secrets/work.env",
       override: true,
       watch: false,
+      pollIntervalMs: 2500,
       mcpReconnect: "all",
       quiet: true,
       debug: true,
@@ -30,6 +32,7 @@ test("normalizeOptions passes through well-typed values", () => {
       path: "~/secrets/work.env",
       override: true,
       watch: false,
+      pollIntervalMs: 2500,
       mcpReconnect: "all",
       quiet: true,
       debug: true,
@@ -43,6 +46,7 @@ test("normalizeOptions falls back to defaults on wrongly typed values", () => {
     path: 42,
     override: "yes",
     watch: 0,
+    pollIntervalMs: "fast",
     quiet: 1,
     debug: "true",
     required: "A",
@@ -50,9 +54,17 @@ test("normalizeOptions falls back to defaults on wrongly typed values", () => {
   assert.equal(options.path, undefined)
   assert.equal(options.override, false)
   assert.equal(options.watch, true)
+  assert.equal(options.pollIntervalMs, 5000)
   assert.equal(options.quiet, false)
   assert.equal(options.debug, false)
   assert.deepEqual(options.required, [])
+  // Negative / non-finite intervals also fall back to the default.
+  assert.equal(normalizeOptions({ pollIntervalMs: -1 }).pollIntervalMs, 5000)
+  assert.equal(normalizeOptions({ pollIntervalMs: Number.NaN }).pollIntervalMs, 5000)
+  // Zero is meaningful: it disables the poll net.
+  assert.equal(normalizeOptions({ pollIntervalMs: 0 }).pollIntervalMs, 0)
+  // Fractional intervals are floored.
+  assert.equal(normalizeOptions({ pollIntervalMs: 1500.9 }).pollIntervalMs, 1500)
 })
 
 test("normalizeOptions treats an empty path as unset", () => {

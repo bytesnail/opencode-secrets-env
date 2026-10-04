@@ -9,6 +9,12 @@ fixes, minor for features.
 
 ### Fixed
 
+- Hot reload could permanently miss an edit when the OS dropped the
+  file-watch event — observed with FSEvents on loaded macOS CI runners,
+  where no event arrived within 60 s. The event watcher is now backed by a
+  low-frequency mtime poll (default 5 s; new `pollIntervalMs` option), so a
+  dropped event degrades to a few seconds' delay instead of a missed reload
+  until restart.
 - Unit tests are now hermetic on machines that export ambient
   `XDG_*`/`OPENCODE_*` variables: the test entry point strips them, and the
   inline-content rescan test pins its scan input.

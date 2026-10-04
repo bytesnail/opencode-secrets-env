@@ -88,6 +88,46 @@ test("server() hot-reloads edits and withdrawals when the file changes", async (
   })
 })
 
+test("server() poll net applies edits even when fs.watch drops events", async (t) => {
+  // FSEvents can drop events under load (observed on macOS CI, 2026-10-04 —
+  // no event within 60 s). With the event path stubbed out, only the mtime
+  // poll net can deliver this reload.
+  const realFs = await import("node:fs")
+  // Spreading all of realFs fails ("Cannot redefine property: constants" —
+  // node:fs has getter-only exports), so provide exactly the exports the
+  // plugin chain (index.ts / env.ts / rawconfig.ts / @opencode/plugin)
+  // imports, overriding only `watch`. `namedExports` is deprecated in node
+  // 24 in favor of `exports`, but the latter does not exist on the 22.18 CI
+  // floor — keep the compatible spelling.
+  const { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } = realFs
+  t.mock.module("node:fs", {
+    cache: false,
+    namedExports: {
+      appendFileSync,
+      existsSync,
+      mkdirSync,
+      readFileSync,
+      readdirSync,
+      renameSync,
+      rmSync,
+      statSync,
+      watch: () => ({ close() {}, on() {} }),
+    },
+  })
+  const fresh = await import("../index.ts")
+  await withTempDir(async (dir) => {
+    const file = join(dir, "secrets.env")
+    writeFileSync(file, `${KEY}=one\n`, { mode: 0o600 })
+    const hooks = await fresh.default.server({ directory: dir }, { path: file, quiet: true, pollIntervalMs: 150 })
+    assert.equal(process.env[KEY], "one")
+
+    writeFileSync(file, `${KEY}=two\n`, { mode: 0o600 })
+    await waitFor(() => process.env[KEY] === "two")
+
+    await hooks.dispose()
+  })
+})
+
 test("server() picks up a secrets file created after startup", async () => {
   await withTempDir(async (dir) => {
     const file = join(dir, "secrets.env")
