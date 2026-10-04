@@ -227,13 +227,22 @@ test("server() rotates the plugin log when it grows past the cap", async () => {
   })
 })
 
-// 15 s ceiling, not 5: fast platforms return as soon as the 50 ms poll sees
-// the condition, so the ceiling only matters on slow ones — fs.watch on
-// macOS (FSEvents) can take several seconds to deliver on a loaded CI runner.
-async function waitFor(condition: () => boolean, timeoutMs = 15000): Promise<void> {
+// Platform-scaled ceiling: fast platforms return as soon as the 50 ms poll
+// sees the condition, so the ceiling only matters on slow ones — and then it
+// is almost always macOS: fs.watch there is FSEvents, whose delivery latency
+// has no SLA and has exceeded 15 s on loaded shared CI runners (2026-10-04
+// CI storm: 4 timeouts in ~30 min, all darwin). 60 s matches the ceiling the
+// e2e harness already uses successfully (test/e2e/run.mjs poll()); Linux
+// inotify / Windows ReadDirectoryChangesW have never come close to 15 s.
+async function waitFor(
+  condition: () => boolean,
+  timeoutMs = process.platform === "darwin" ? 60_000 : 15_000,
+): Promise<void> {
   const start = Date.now()
   while (!condition()) {
-    if (Date.now() - start > timeoutMs) throw new Error("timed out waiting for the hot reload")
+    const waitedMs = Date.now() - start
+    if (waitedMs > timeoutMs)
+      throw new Error(`timed out waiting for the hot reload (${process.platform}, gave up after ${waitedMs} ms)`)
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
 }
