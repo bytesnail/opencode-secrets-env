@@ -33,6 +33,10 @@ CI does the rest.
   and `reconnecting MCP server(s)`. Reword a message and its tests together.
 - **Keep `README.md` and `README.zh-CN.md` in sync.** Both are user-facing;
   a change to one belongs in the other.
+- **Write conventional-commit subjects** (`feat:`/`fix:`/`docs:`/`test:`/
+  `ci:`/`chore:`/`perf:`/`refactor:`, optional `(scope)` and `!`). Release
+  changelog drafts are generated from them by `scripts/changelog.ts` — a
+  non-conventional subject simply never makes it into the draft.
 - **Read `AGENTS.md` before touching host-facing behavior** (`rawconfig.ts`,
   config-source precedence, MCP config shapes, plugin loading). It records
   the verified V1/V2 contract — getting it wrong is this repo's historical
@@ -48,6 +52,8 @@ CI does the rest.
   (flat V1 `mcp.<name>` and nested V2 `mcp.servers.<name>` shapes).
 - `test/` — `node --test` unit tests, plus `test/e2e/run.mjs` which packs the
   plugin and asserts the full chain against the real pinned hosts.
+- `scripts/changelog.ts` — release tooling: the `npm version` lifecycle hook
+  that drafts the new CHANGELOG.md section from conventional commits.
 
 ## Pull requests
 
