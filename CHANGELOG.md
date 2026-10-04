@@ -14,10 +14,10 @@ fixes, minor for features.
   where no event arrived within 60 s. The event watcher is now backed by a
   low-frequency mtime poll (default 5 s; new `pollIntervalMs` option), so a
   dropped event degrades to a few seconds' delay instead of a missed reload
-  until restart.
+  until restart. (`78134e8`)
 - Unit tests are now hermetic on machines that export ambient
   `XDG_*`/`OPENCODE_*` variables: the test entry point strips them, and the
-  inline-content rescan test pins its scan input.
+  inline-content rescan test pins its scan input. (`8bdfe06`, `d0cb49f`)
 
 ## [0.5.0] - 2026-10-04
 

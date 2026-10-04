@@ -72,12 +72,67 @@ test("renderChangelog carries curated entries, appends buckets, refreshes links"
   assert.match(out, /\[0\.4\.5\]: https:\/\/github\.com\/example\/repo\/compare\/v0\.4\.4\.\.\.v0\.4\.5/)
 })
 
-test("dedupeKey normalizes bullets, hashes, punctuation and case", () => {
+test("dedupeKey normalizes bullets, hashes, PR refs, punctuation and case", () => {
   assert.equal(dedupeKey("- Plug leak (`aaa1111`)"), "plug leak")
   assert.equal(dedupeKey("- Plug leak (`aaa1111`, `bbb2222`)."), "plug leak")
   assert.equal(dedupeKey("- Plug Leak."), "plug leak")
   assert.equal(dedupeKey("Plug leak"), "plug leak")
+  assert.equal(dedupeKey("Back the watcher (#6)"), "back the watcher")
+  assert.equal(dedupeKey("- Back the watcher (#6) (`aaa1111`)"), "back the watcher")
   assert.notEqual(dedupeKey("- Add flag"), dedupeKey("- Add flag validation"))
+})
+
+test("renderChangelog skips commits a curated entry claims by hash, however worded", () => {
+  const text = `# Changelog
+
+## [Unreleased]
+
+### Fixed
+
+- Prose write-up worded nothing like the commit subject, with the claim on
+  a continuation line. (\`aaa1111\`)
+- Another entry claiming several commits at once (\`bbb2222\`, \`ccc333344445555\`).
+
+## [0.5.0] - 2026-10-04
+
+- Old.
+
+[Unreleased]: ${REPO}/compare/v0.5.0...HEAD
+[0.5.0]: ${REPO}/compare/v0.4.5...v0.5.0
+`
+  const out = renderChangelog(text, {
+    version: "0.5.1",
+    date: "2026-10-05",
+    prevTag: "v0.5.0",
+    repoUrl: REPO,
+    commits: [
+      { hash: "aaa1111", subject: "fix: totally different wording" },
+      { hash: "bbb2222", subject: "feat: multi-claim first" },
+      { hash: "ccc3333", subject: "feat: multi-claim second" },
+      { hash: "ddd4444", subject: "fix: unclaimed sibling" },
+    ],
+  })
+  assert.ok(out)
+  assert.ok(!out.includes("Totally different wording"), "claimed commit dropped")
+  assert.ok(!out.includes("Multi-claim first"), "first of multi-claim dropped")
+  assert.ok(!out.includes("Multi-claim second"), "full-hash claim matches abbreviated %h")
+  assert.ok(out.includes("- Unclaimed sibling (`ddd4444`)"), "unclaimed commit kept")
+  // The claims ride along verbatim as part of the curated entries.
+  assert.ok(out.includes("(`aaa1111`)"), "curated entry carried verbatim with its claim")
+})
+
+test("renderChangelog text-dedupes despite GitHub's '(#N)' squash suffix", () => {
+  const text = `# Changelog\n\n## [Unreleased]\n\n### Internal\n\n- Add single 'gate' check context.\n`
+  const out = renderChangelog(text, {
+    version: "0.5.1",
+    date: "2026-10-05",
+    prevTag: "v0.5.0",
+    repoUrl: REPO,
+    commits: [{ hash: "eee5555", subject: "ci: add single 'gate' check context (#3)" }],
+  })
+  assert.ok(out)
+  assert.equal(out.match(/gate' check context/g)?.length, 1, "PR-ref suffix does not defeat dedup")
+  assert.ok(!out.includes("eee5555"))
 })
 
 test("renderChangelog drops generated entries duplicating curated lines or earlier commits", () => {
