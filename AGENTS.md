@@ -6,8 +6,8 @@ OpenCode plugin (single npm package, TypeScript source, **no build step** — ho
 
 ```sh
 npm run typecheck          # tsc --noEmit — run before tests; prepublishOnly runs typecheck && test
-npm test                   # unit tests: node --test on TS directly (type stripping — hence node >=22.18)
-node --test test/rawconfig.test.ts   # single test file
+npm test                   # unit tests: test/run.mjs strips ambient XDG_*/OPENCODE_* then spawns node --test (TS type stripping — hence node >=22.18)
+node test/run.mjs test/rawconfig.test.ts   # single test file (goes through the same env sanitizer — a bare `node --test` is NOT hermetic on desktops exporting XDG_CONFIG_HOME)
 npm run test:e2e           # real-host e2e: downloads pinned V1+V2 hosts (~100MB each), takes minutes
 ```
 
