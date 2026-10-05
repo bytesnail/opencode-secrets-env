@@ -3,8 +3,12 @@
 // bumps package.json and then runs this: CHANGELOG.md's [Unreleased] section
 // becomes a dated section for the new version — entries already curated
 // under [Unreleased] are carried over verbatim, then the conventional
-// commits since the previous tag are appended as draft entries — and the
-// link definitions at the bottom are refreshed. The file is left staged
+// commits since the previous tag are appended as draft entries —
+// deduplicated: a commit is skipped when a curated entry claims its hash
+// in backticks (curators should annotate covered commits this way, e.g.
+// "… as described. (`aaa1111`)"), or when its normalized text matches a
+// curated line or an earlier commit — and the link definitions at the
+// bottom are refreshed. The file is left staged
 // (see the `version` script in package.json); review/trim the generated
 // entries before committing `chore: release vX.Y.Z`.
 //
@@ -54,6 +58,26 @@ export function classify(subject: string): { bucket: string; text: string } | nu
   return null
 }
 
+// Normalizes a changelog bullet for text deduplication: drops the leading
+// "- ", any trailing commit-hash annotation or "(#N)" PR ref, trailing
+// punctuation, and case — so a curated "- Plug leak." matches the generated
+// "- Plug leak (`aaa1111`)". Curated prose is usually worded nothing like
+// the commit subject, though, so text matching alone cannot dedupe the
+// real cases: curated entries claim the commits they cover by hash.
+export function dedupeKey(entry: string): string {
+  return entry
+    .replace(/^- /, "")
+    .replace(/\s*\((`[0-9a-f]+`(, )?)+\)\.?$/i, "")
+    .replace(/\s*\(#\d+\)$/, "")
+    .replace(/[\s.]+$/, "")
+    .toLowerCase()
+}
+
+// A backtick-quoted hex string (7-40 chars) anywhere in the curated section
+// claims that commit: its generated draft entry is skipped. Abbreviated and
+// full hashes match each other (prefix comparison either way).
+const HASH_CLAIM = /`([0-9a-f]{7,40})`/gi
+
 // Merges generated bucket items into the curated section: buckets whose
 // `### <Name>` heading already exists get their items appended in place;
 // the rest become new subsections (in BUCKETS order) after the curated text.
@@ -100,10 +124,24 @@ export function renderChangelog(text: string, opts: RenderOptions): string | nul
   if (nextAt < 0) nextAt = text.length
   const curated = text.slice(headingEnd, nextAt).trim()
 
+  // Dedupe: collect hash claims and seed the seen-set with the curated
+  // bullets, then drop claimed commits and keep only the first generated
+  // entry per normalized text (commits arrive oldest-first).
+  const claims: string[] = []
+  for (const m of curated.matchAll(HASH_CLAIM)) claims.push(m[1]!.toLowerCase())
+  const seen = new Set<string>()
+  for (const line of curated.split("\n")) {
+    const bullet = line.trimStart()
+    if (bullet.startsWith("- ")) seen.add(dedupeKey(bullet))
+  }
   const byBucket = new Map<string, string[]>()
   for (const { hash, subject } of commits) {
     const c = classify(subject)
     if (!c) continue
+    if (claims.some((claim) => claim.startsWith(hash) || hash.startsWith(claim))) continue
+    const key = dedupeKey(c.text)
+    if (seen.has(key)) continue
+    seen.add(key)
     let items = byBucket.get(c.bucket)
     if (!items) {
       items = []
