@@ -7,14 +7,19 @@ fixes, minor for features.
 
 ## [Unreleased]
 
+### Added
+
+- New `pollIntervalMs` option (default `5000`): interval of the mtime poll
+  backing the file watcher when `watch` is on. `0` disables the poll (not
+  recommended). (`78134e8`)
+
 ### Fixed
 
 - Hot reload could permanently miss an edit when the OS dropped the
   file-watch event — observed with FSEvents on loaded macOS CI runners,
   where no event arrived within 60 s. The event watcher is now backed by a
-  low-frequency mtime poll (default 5 s; new `pollIntervalMs` option), so a
-  dropped event degrades to a few seconds' delay instead of a missed reload
-  until restart. (`78134e8`)
+  low-frequency mtime poll, so a dropped event degrades to a few seconds'
+  delay instead of a missed reload until restart. (`78134e8`)
 - Unit tests are now hermetic on machines that export ambient
   `XDG_*`/`OPENCODE_*` variables: the test entry point strips them, and the
   inline-content rescan test pins its scan input. (`8bdfe06`, `d0cb49f`)
