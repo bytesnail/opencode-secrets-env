@@ -1,6 +1,7 @@
-import { appendFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync, watch, type FSWatcher } from "node:fs"
+import { createHash } from "node:crypto"
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, watch, type FSWatcher } from "node:fs"
 import { homedir } from "node:os"
-import { basename, dirname, join } from "node:path"
+import { basename, dirname, join, relative, resolve } from "node:path"
 import { Plugin } from "@opencode/plugin"
 import { SecretsStore, defaultSecretsPath, expandPath, missingRequired, readSecrets } from "./env.ts"
 import {
@@ -135,14 +136,24 @@ interface Instance {
   scanRefs: () => ServerReferences
 }
 
+interface FileSignature {
+  exists: boolean
+  mtimeMs: number
+  ctimeMs: number
+  size: number
+  contentHash: string
+}
+
 interface FileState {
   store: SecretsStore
   instances: Set<Instance>
   watcher?: FSWatcher
+  watchRetry?: ReturnType<typeof setTimeout>
+  watchFailures: number
   timer?: ReturnType<typeof setTimeout>
   pollTimer?: ReturnType<typeof setInterval>
   /** File signature as of the last successful apply — the poll net's baseline. */
-  applied?: { exists: boolean; mtimeMs: number }
+  applied?: FileSignature
   busy: boolean
   queued: boolean
 }
@@ -152,10 +163,23 @@ const files = new Map<string, FileState>()
 function stateFor(file: string): FileState {
   let state = files.get(file)
   if (!state) {
-    state = { store: new SecretsStore(), instances: new Set(), busy: false, queued: false }
+    state = { store: new SecretsStore(), instances: new Set(), watchFailures: 0, busy: false, queued: false }
     files.set(file, state)
   }
   return state
+}
+
+const RELOAD_OPTION_KEYS = ["override", "pollIntervalMs", "quiet", "debug"] as const
+
+function warnOnReloadOptionConflict(state: FileState, instance: Instance): void {
+  const first = [...state.instances][0]
+  if (!first || first === instance) return
+  const conflicts = RELOAD_OPTION_KEYS.filter((key) => !Object.is(first.options[key], instance.options[key]))
+  if (conflicts.length === 0) return
+  instance.emit(
+    "warn",
+    `conflicting reload options for shared ${instance.file}: ${conflicts.join(", ")}; the first registered instance controls reload`,
+  )
 }
 
 function sleep(ms: number): Promise<void> {
@@ -163,16 +187,19 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * What the poll net compares: existence + mtime. Callers take the signature
- * BEFORE reading so a write landing mid-read records the older signature —
- * the next poll tick then schedules one extra (harmless, diffed) reload
- * instead of missing the update.
+ * What the poll net compares: existence, size, mtime, ctime and a content hash.
+ * The hash closes same-metadata rewrites on every platform; ctime additionally
+ * covers chmod-only recovery on POSIX. Callers still take the signature BEFORE
+ * parsing/applying, so a write landing in between schedules one extra diffed
+ * reload instead of missing the update.
  */
-function fileSignature(file: string): { exists: boolean; mtimeMs: number } {
+function fileSignature(file: string): FileSignature {
   try {
-    return { exists: true, mtimeMs: statSync(file).mtimeMs }
+    const stat = statSync(file)
+    const contentHash = createHash("sha256").update(readFileSync(file)).digest("hex")
+    return { exists: true, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, size: stat.size, contentHash }
   } catch {
-    return { exists: false, mtimeMs: 0 }
+    return { exists: false, mtimeMs: 0, ctimeMs: 0, size: 0, contentHash: "" }
   }
 }
 
@@ -357,6 +384,25 @@ function deepestExisting(directory: string): string {
   return current
 }
 
+/**
+ * Give every spelling of a secrets path one ownership identity. realpath also
+ * resolves symlinked files/directories; when the file does not exist yet,
+ * canonicalize its deepest existing ancestor and retain the missing suffix.
+ */
+function canonicalFilePath(file: string): string {
+  const resolved = resolve(file)
+  try {
+    return realpathSync(resolved)
+  } catch {
+    const existingParent = deepestExisting(dirname(resolved))
+    try {
+      return join(realpathSync(existingParent), relative(existingParent, resolved))
+    } catch {
+      return resolved
+    }
+  }
+}
+
 function scheduleReload(state: FileState, file: string): void {
   if (state.timer) clearTimeout(state.timer)
   state.timer = setTimeout(() => {
@@ -368,10 +414,11 @@ function scheduleReload(state: FileState, file: string): void {
 /**
  * Event-driven watchers can silently drop events — FSEvents does exactly
  * that under load (observed 2026-10-04 on macOS CI: no event within 60 s).
- * Back the watcher with a low-frequency mtime poll so a dropped event
+ * Back the watcher with a low-frequency content poll so a dropped event
  * degrades to a few seconds' delay instead of a permanently missed reload.
- * One stat per interval; unref'd like the watcher, so it never keeps the
- * host process alive.
+ * One stat plus a read/hash per interval; unref'd like the watcher, so it
+ * never keeps the host process alive. The content read closes metadata-aliasing
+ * races without adding a parse unless the signature actually changes.
  */
 function ensurePollNet(instance: Instance): void {
   if (!instance.options.watch) return
@@ -395,7 +442,14 @@ function ensurePollNet(instance: Instance): void {
       if (signature.exists) scheduleReload(state, instance.file)
       return
     }
-    if (applied.exists === signature.exists && applied.mtimeMs === signature.mtimeMs) return
+    if (
+      applied.exists === signature.exists &&
+      applied.mtimeMs === signature.mtimeMs &&
+      applied.ctimeMs === signature.ctimeMs &&
+      applied.size === signature.size &&
+      applied.contentHash === signature.contentHash
+    )
+      return
     scheduleReload(state, instance.file)
   }, interval)
   timer.unref()
@@ -405,6 +459,7 @@ function ensurePollNet(instance: Instance): void {
 function ensureWatcher(instance: Instance): void {
   if (!instance.options.watch) return
   const state = stateFor(instance.file)
+  if (state.instances.size === 0 || state.watchRetry) return
   if (state.watcher) return
 
   const directory = dirname(instance.file)
@@ -418,6 +473,11 @@ function ensureWatcher(instance: Instance): void {
     // save atomically (write temp + rename) replace the inode, which would
     // silently end a file-level watch.
     const watcher = watch(watchDir, { persistent: false }, (_event, filename) => {
+      if (state.instances.size === 0) return
+      // A delivered event proves the current watcher is healthy; reset the
+      // backoff after recovery rather than on construction (which would make
+      // an immediate-error loop reset its own delay forever).
+      state.watchFailures = 0
       const current = stateFor(instance.file)
       if (watchDir !== directory) {
         // Ancestor mode: react only when the watch can move closer to the
@@ -452,13 +512,16 @@ function ensureWatcher(instance: Instance): void {
       // must neither clobber the replacement nor warn about a live watch.
       if (state.watcher !== watcher) return
       state.watcher = undefined
-      // Re-arm instead of giving up: the watched directory may have been
-      // deleted (then recreated), and the deepest-existing-ancestor logic
-      // moves the watch to wherever the path can be observed again.
-      ensureWatcher(instance)
-      if (!state.watcher) {
-        instance.emit("warn", `file watcher for ${instance.file} stopped; restart the service to apply future edits`)
-      }
+      if (state.instances.size === 0) return
+      state.watchFailures += 1
+      const exponent = Math.min(state.watchFailures - 1, 16)
+      const delayMs = Math.min(30_000, 250 * 2 ** exponent)
+      state.watchRetry = setTimeout(() => {
+        state.watchRetry = undefined
+        ensureWatcher(instance)
+      }, delayMs)
+      state.watchRetry.unref()
+      instance.emit("warn", `file watcher for ${instance.file} failed; retrying in ${delayMs} ms`)
     })
     instance.emit(
       "debug",
@@ -474,7 +537,9 @@ function dropWatcherAndStore(file: string): void {
   if (!state || state.instances.size > 0) return
   if (state.timer) clearTimeout(state.timer)
   if (state.pollTimer) clearInterval(state.pollTimer)
+  if (state.watchRetry) clearTimeout(state.watchRetry)
   state.watcher?.close()
+  state.watcher = undefined
   const released = state.store.release()
   if (released.length > 0) {
     appendLog(`${PREFIX} unloaded: withdrew ${released.length} injected key(s) from ${file}`)
@@ -538,10 +603,12 @@ async function registerEnvRefTransform(instance: Instance): Promise<McpRegistrat
  */
 function activate(options: NormalizedOptions, directory: string, mcp?: McpLike): () => void {
   const emit = makeEmit(options)
-  const file = options.path ? expandPath(options.path, directory) : defaultSecretsPath()
+  const file = canonicalFilePath(options.path ? expandPath(options.path, directory) : defaultSecretsPath())
   const instance: Instance = { file, options, mcp, emit, scanRefs: makeRefScanner(directory) }
 
-  stateFor(file).instances.add(instance)
+  const state = stateFor(file)
+  state.instances.add(instance)
+  warnOnReloadOptionConflict(state, instance)
   // Watch before the initial load so an edit landing between the two is not
   // missed (the debounced reload picks it up).
   ensureWatcher(instance)

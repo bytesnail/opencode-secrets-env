@@ -55,8 +55,7 @@ test("readSecrets reports missing files without an error", () => {
   })
 })
 
-test("readSecrets reports unreadable files as errors", () => {
-  if (process.platform === "win32") return
+test("readSecrets reports unreadable files as errors", { skip: process.platform === "win32" }, () => {
   withTempDir((dir) => {
     const file = join(dir, "secrets.env")
     writeFileSync(file, "API_KEY=x\n", { mode: 0o600 })
@@ -68,8 +67,7 @@ test("readSecrets reports unreadable files as errors", () => {
   })
 })
 
-test("readSecrets flags group/world readable files as insecure", () => {
-  if (process.platform === "win32") return
+test("readSecrets flags group/world readable files as insecure", { skip: process.platform === "win32" }, () => {
   withTempDir((dir) => {
     const file = join(dir, "secrets.env")
     writeFileSync(file, "API_KEY=x\n", { mode: 0o644 })
@@ -169,6 +167,20 @@ test("SecretsStore treats an existing empty string as a real value", () => {
   const result = store.apply({ EMPTY: "from-file" })
   assert.equal(env.EMPTY, "")
   assert.deepEqual(result.kept, ["EMPTY"])
+})
+
+test("SecretsStore releases prototype-named own keys after override", () => {
+  const env: Record<string, string | undefined> = { constructor: "from-shell" }
+  const store = new SecretsStore(env)
+
+  store.apply({ constructor: "from-file", NORMAL: "owned" }, { override: true })
+  assert.equal(env.constructor, "from-file")
+
+  const released = store.release()
+  assert.deepEqual(released.sort(), ["NORMAL", "constructor"])
+  assert.equal(env.constructor, "from-shell")
+  assert.equal(env.NORMAL, undefined)
+  assert.deepEqual(store.keys(), [])
 })
 
 // ---------------------------------------------------------------------------

@@ -55,22 +55,21 @@ export function templateNames(template: string): string[] {
 }
 
 /**
- * Resolve a raw template the way the host does when loading a config file:
+ * Resolve a raw template for assignment into an already-parsed MCP object:
  * {env:NAME} first (missing variables become ""), then {file:path} against the
- * config file's directory. A template containing {file:...} must never be
- * re-substituted for the {env:...} part alone — that would overwrite the
- * host-materialized file content with the literal token.
+ * config file's directory. The host also JSON-escapes file content, but only
+ * because it substitutes raw JSON text before parsing; this object-layer path
+ * must retain the actual string characters instead.
  */
 export function resolveTemplate(ref: EnvReference, env: Record<string, string | undefined> = process.env): string {
   return substituteFileRefs(substitute(ref.template, env), ref.dir)
 }
 
 /**
- * Substitute {file:path} tokens, mirroring the host: "~/" expands, relative
- * paths resolve against the config file's directory, and the file content is
- * trimmed and JSON-escaped. An unreadable target is left as a literal token —
- * the host fails the whole config load in that case, so the field never
- * materializes anyway.
+ * Substitute {file:path} tokens for an already-parsed object value: "~/"
+ * expands, relative paths resolve against the config file's directory, and
+ * file content is trimmed. Missing/unreadable targets become an empty string,
+ * matching V2.2.6's warning-and-empty fallback rather than leaking the token.
  */
 function substituteFileRefs(text: string, dir: string): string {
   if (!text.includes("{file:")) return text
@@ -78,9 +77,9 @@ function substituteFileRefs(text: string, dir: string): string {
     const expanded = filePath.startsWith("~/") ? join(homedir(), filePath.slice(2)) : filePath
     const resolved = isAbsolute(expanded) ? expanded : resolve(dir, expanded)
     try {
-      return JSON.stringify(readFileSync(resolved, "utf8").trim()).slice(1, -1)
+      return readFileSync(resolved, "utf8").trim()
     } catch {
-      return token
+      return ""
     }
   })
 }
