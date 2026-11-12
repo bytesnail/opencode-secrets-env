@@ -22,6 +22,7 @@ import { request } from "node:http"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { poll, v1SessionEndpointTimeoutMs } from "./poll.ts"
 
 const HOST_SPECS = {
   v1: process.env.OPENCODE_E2E_V1_SPEC ?? "opencode-ai@1.18.34",
@@ -70,15 +71,6 @@ function npm(argv, options = {}) {
   return process.platform === "win32"
     ? run("cmd.exe", ["/d", "/s", "/c", "npm", ...argv], { ...options, timeout })
     : run("npm", argv, { ...options, timeout })
-}
-
-async function poll(description, condition, timeoutMs = 60_000) {
-  const start = Date.now()
-  for (;;) {
-    if (await condition()) return true
-    if (Date.now() - start > timeoutMs) throw new Error(`timed out waiting for: ${description}`)
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
 }
 
 function readLines(file) {
@@ -297,7 +289,7 @@ async function v1Flow() {
       })
     // V1's serve does not bootstrap the project (or load plugins) until the
     // first session is created over HTTP.
-    await poll("v1 server session endpoint", () => createSession())
+    await poll("v1 server session endpoint", () => createSession(), v1SessionEndpointTimeoutMs(process.platform))
     await poll("plugin load", () => readLines(pluginLog).some((line) => line.includes("startup: 1 injected")))
     check("v1: plugin injected on session bootstrap", true)
 
