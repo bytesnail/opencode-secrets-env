@@ -131,18 +131,20 @@ test("resolveTemplate resolves {file:...} against the config file's directory an
   withTempDir((dir) => {
     writeFileSync(join(dir, "a.txt"), "relative")
     assert.equal(resolveTemplate({ path: [], template: "{file:a.txt}", dir }, {}), "relative")
-    assert.equal(resolveTemplate({ path: [], template: "{file:~/none-opencode-secrets-env}", dir }, {}), "{file:~/none-opencode-secrets-env}")
+    assert.equal(resolveTemplate({ path: [], template: "{file:~/none-opencode-secrets-env}", dir }, {}), "")
   })
 })
 
-test("resolveTemplate escapes file content like JSON and leaves unreadable files literal", () => {
+test("resolveTemplate returns object-layer file values and empty unreadable refs", () => {
   withTempDir((dir) => {
     writeFileSync(join(dir, "multiline.txt"), 'line "one"\nline two')
-    assert.equal(resolveTemplate({ path: [], template: "{file:multiline.txt}", dir }, {}), 'line \\"one\\"\\nline two')
-    // The host fails the whole config load for a missing {file:} target, so
-    // the field never materializes; keep the literal token rather than
-    // inventing a value.
-    assert.equal(resolveTemplate({ path: [], template: "{file:missing.txt}", dir }, {}), "{file:missing.txt}")
+    // The host escapes while substituting raw JSON text, then JSON.parse
+    // restores the actual characters. This function writes into an already
+    // parsed object, so it must return the real string rather than the escape.
+    assert.equal(resolveTemplate({ path: [], template: "{file:multiline.txt}", dir }, {}), 'line "one"\nline two')
+    // V2.2.6 treats a missing/unreadable file like a missing env var: warn and
+    // substitute empty rather than materializing the literal token.
+    assert.equal(resolveTemplate({ path: [], template: "{file:missing.txt}", dir }, {}), "")
   })
 })
 

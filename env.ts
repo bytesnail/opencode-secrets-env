@@ -135,7 +135,7 @@ export class SecretsStore {
         }
         continue
       }
-      const existing = this.env[key]
+      const existing = Object.hasOwn(this.env, key) ? this.env[key] : undefined
       if (existing === undefined) {
         this.managed.set(key, undefined)
         this.env[key] = value
@@ -152,7 +152,7 @@ export class SecretsStore {
     }
 
     for (const [key, previous] of [...this.managed]) {
-      if (key in parsed) continue
+      if (Object.hasOwn(parsed, key)) continue
       if (previous === undefined) delete this.env[key]
       else this.env[key] = previous
       this.managed.delete(key)

@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import plugin from "../index.ts"
@@ -99,7 +99,7 @@ test("server() poll net applies edits even when fs.watch drops events", async (t
   // imports, overriding only `watch`. `namedExports` is deprecated in node
   // 24 in favor of `exports`, but the latter does not exist on the 22.18 CI
   // floor — keep the compatible spelling.
-  const { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } = realFs
+  const { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync, utimesSync } = realFs
   t.mock.module("node:fs", {
     cache: false,
     namedExports: {
@@ -107,6 +107,137 @@ test("server() poll net applies edits even when fs.watch drops events", async (t
       existsSync,
       mkdirSync,
       readFileSync,
+      realpathSync,
+      readdirSync,
+      renameSync,
+      rmSync,
+      statSync,
+      utimesSync,
+      watch: () => ({ close() {}, on() {} }),
+    },
+  })
+  const fresh = await import(new URL("../index.ts?poll-net", import.meta.url).href)
+  await withTempDir(async (dir) => {
+    const file = join(dir, "secrets.env")
+    const T0 = 1700000000000
+    const T1 = T0 + 5000
+    writeFileSync(file, `${KEY}=one\n`, { mode: 0o600 })
+    utimesSync(file, new Date(T0), new Date(T0))
+    const hooks = await fresh.default.server({ directory: dir }, { path: file, quiet: true, pollIntervalMs: 150 })
+    assert.equal(process.env[KEY], "one")
+
+    writeFileSync(file, `${KEY}=two\n`, { mode: 0o600 })
+    utimesSync(file, new Date(T1), new Date(T1))
+    await waitFor(() => process.env[KEY] === "two")
+
+    // Same byte length and restored mtime: only a stronger signature can
+    // observe this write when the event path is dropped.
+    writeFileSync(file, `${KEY}=six\n`, { mode: 0o600 })
+    utimesSync(file, new Date(T1), new Date(T1))
+    await waitFor(() => process.env[KEY] === "six", 5000)
+
+    await hooks.dispose()
+  })
+})
+
+test("server() backs off before re-arming a failed watcher", async (t) => {
+  const realFs = await import("node:fs")
+  const { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync } = realFs
+  let watchCalls = 0
+  let armError: ((error: Error) => void) | undefined
+  t.mock.module("node:fs", {
+    cache: false,
+    namedExports: {
+      appendFileSync,
+      existsSync,
+      mkdirSync,
+      readFileSync,
+      realpathSync,
+      readdirSync,
+      renameSync,
+      rmSync,
+      statSync,
+      watch: () => {
+        watchCalls += 1
+        return {
+          close() {},
+          on(event: string, handler: (error: Error) => void) {
+            if (event === "error") armError = handler
+          },
+        }
+      },
+    },
+  })
+  const fresh = await import(new URL("../index.ts?watcher-backoff", import.meta.url).href)
+  await withTempDir(async (dir) => {
+    const file = join(dir, "secrets.env")
+    writeFileSync(file, `${KEY}=one\n`, { mode: 0o600 })
+    const hooks = await fresh.default.server({ directory: dir }, { path: file, quiet: true, pollIntervalMs: 0 })
+    try {
+      assert.equal(watchCalls, 1)
+      armError?.(new Error("synthetic watcher failure"))
+      // The failure must enter a retry delay rather than synchronously
+      // constructing the next watcher in the error callback itself.
+      assert.equal(watchCalls, 1)
+      await waitFor(() => watchCalls === 2, 5000)
+    } finally {
+      await hooks.dispose()
+    }
+    const afterDispose = watchCalls
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    assert.equal(watchCalls, afterDispose)
+  })
+})
+
+test("server() poll net detects content changes with pinned stat metadata", async (t) => {
+  const realFs = await import("node:fs")
+  const { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync } = realFs
+  const pinnedStat = (file: string) => {
+    const stat = statSync(file)
+    return { ...stat, mtimeMs: 1, ctimeMs: 1, size: 1 }
+  }
+  t.mock.module("node:fs", {
+    cache: false,
+    namedExports: {
+      appendFileSync,
+      existsSync,
+      mkdirSync,
+      readFileSync,
+      realpathSync,
+      readdirSync,
+      renameSync,
+      rmSync,
+      statSync: pinnedStat,
+      watch: () => ({ close() {}, on() {} }),
+    },
+  })
+  const fresh = await import(new URL("../index.ts?pinned-stat", import.meta.url).href)
+  await withTempDir(async (dir) => {
+    const file = join(dir, "secrets.env")
+    writeFileSync(file, `${KEY}=one\n`, { mode: 0o600 })
+    const hooks = await fresh.default.server({ directory: dir }, { path: file, quiet: true, pollIntervalMs: 80 })
+    try {
+      assert.equal(process.env[KEY], "one")
+      writeFileSync(file, `${KEY}=two\n`, { mode: 0o600 })
+      await waitFor(() => process.env[KEY] === "two", 5000)
+    } finally {
+      await hooks.dispose()
+    }
+  })
+})
+
+test("server() poll net recovers when chmod fixes a startup read error", { skip: process.platform === "win32" }, async (t) => {
+  const realFs = await import("node:fs")
+  const { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync } = realFs
+  t.mock.module("node:fs", {
+    cache: false,
+    namedExports: {
+      appendFileSync,
+      chmodSync,
+      existsSync,
+      mkdirSync,
+      readFileSync,
+      realpathSync,
       readdirSync,
       renameSync,
       rmSync,
@@ -114,17 +245,21 @@ test("server() poll net applies edits even when fs.watch drops events", async (t
       watch: () => ({ close() {}, on() {} }),
     },
   })
-  const fresh = await import("../index.ts")
+  const fresh = await import(new URL("../index.ts?chmod-recovery", import.meta.url).href)
   await withTempDir(async (dir) => {
     const file = join(dir, "secrets.env")
-    writeFileSync(file, `${KEY}=one\n`, { mode: 0o600 })
-    const hooks = await fresh.default.server({ directory: dir }, { path: file, quiet: true, pollIntervalMs: 150 })
-    assert.equal(process.env[KEY], "one")
-
-    writeFileSync(file, `${KEY}=two\n`, { mode: 0o600 })
-    await waitFor(() => process.env[KEY] === "two")
-
-    await hooks.dispose()
+    writeFileSync(file, `${KEY}=recovered\n`, { mode: 0o600 })
+    chmodSync(file, 0o000)
+    const hooks = await fresh.default.server({ directory: dir }, { path: file, quiet: true, pollIntervalMs: 80 })
+    try {
+      assert.equal(process.env[KEY], undefined)
+      // Let the baseline and its initial retry settle while still unreadable.
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      chmodSync(file, 0o600)
+      await waitFor(() => process.env[KEY] === "recovered", 5000)
+    } finally {
+      await hooks.dispose()
+    }
   })
 })
 
@@ -172,6 +307,64 @@ test("server() shares one store across instances of the same file until the last
 
     await second.dispose()
     assert.equal(process.env[KEY], undefined)
+  })
+})
+
+test("server() shares ownership with a non-normalized path alias", async () => {
+  await withTempDir(async (dir) => {
+    const file = join(dir, "secrets.env")
+    const alias = `${dir}/unused/../secrets.env`
+    writeFileSync(file, `${KEY}=shared\n`, { mode: 0o600 })
+
+    const first = await plugin.server({ directory: dir }, { path: file, watch: false, quiet: true })
+    const second = await plugin.server({ directory: dir }, { path: alias, watch: false, quiet: true })
+    await first.dispose()
+    assert.equal(process.env[KEY], "shared")
+    await second.dispose()
+    assert.equal(process.env[KEY], undefined)
+  })
+})
+
+test("server() shares ownership with a symlinked directory alias", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("symlink creation may require elevated privileges on Windows")
+    return
+  }
+  await withTempDir(async (dir) => {
+    const realDir = join(dir, "real")
+    const linkDir = join(dir, "link")
+    mkdirSync(realDir)
+    symlinkSync(realDir, linkDir)
+    const file = join(realDir, "secrets.env")
+    writeFileSync(file, `${KEY}=shared\n`, { mode: 0o600 })
+
+    const first = await plugin.server({ directory: dir }, { path: file, watch: false, quiet: true })
+    const second = await plugin.server({ directory: dir }, { path: join(linkDir, "secrets.env"), watch: false, quiet: true })
+    await first.dispose()
+    assert.equal(process.env[KEY], "shared")
+    await second.dispose()
+    assert.equal(process.env[KEY], undefined)
+  })
+})
+
+test("server() warns when shared-file instances have conflicting reload options", async () => {
+  await withTempDir(async (dir) => {
+    const previousXdg = process.env.XDG_DATA_HOME
+    process.env.XDG_DATA_HOME = join(dir, "data")
+    try {
+      const log = join(dir, "data", "opencode", "log", "opencode-secrets-env.log")
+      const file = join(dir, "secrets.env")
+      writeFileSync(file, `${KEY}=shared\n`, { mode: 0o600 })
+      const first = await plugin.server({ directory: dir }, { path: file, watch: false, quiet: true, override: false })
+      const second = await plugin.server({ directory: dir }, { path: file, watch: false, quiet: true, override: true })
+      assert.ok(readLog(log).includes("conflicting reload options"))
+      assert.ok(readLog(log).includes("override"))
+      await first.dispose()
+      await second.dispose()
+    } finally {
+      if (previousXdg === undefined) delete process.env.XDG_DATA_HOME
+      else process.env.XDG_DATA_HOME = previousXdg
+    }
   })
 })
 
