@@ -30,6 +30,7 @@ const defaultFiles = [
   "test/index.test.ts",
   "test/mcp.test.ts",
   "test/changelog.test.ts",
+  "test/e2e/poll.test.ts",
 ]
 const files = process.argv.slice(2)
 // --experimental-test-module-mocks: enables t.mock.module (node:test module
