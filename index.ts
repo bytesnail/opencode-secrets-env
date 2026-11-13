@@ -20,8 +20,10 @@ export interface NormalizedOptions {
   path?: string
   override: boolean
   watch: boolean
-  /** mtime poll safety net backing the event watcher (gated by `watch`); 0 disables. */
+  /** Content poll safety net backing the event watcher (gated by `watch`); 0 disables. */
   pollIntervalMs: number
+  /** Present when an invalid interval was replaced by the default. */
+  pollIntervalWarning?: string
   /** true = servers referencing changed keys, "all" = every enabled server, string[] = only these, false = none. */
   mcpReconnect: McpReconnectOption
   quiet: boolean
@@ -36,16 +38,19 @@ export interface NormalizedOptions {
  */
 export function normalizeOptions(raw: Record<string, unknown> | undefined): NormalizedOptions {
   const options = raw ?? {}
+  const rawPollInterval = options.pollIntervalMs
+  const validPollInterval =
+    rawPollInterval === undefined ||
+    (typeof rawPollInterval === "number" && Number.isInteger(rawPollInterval) && rawPollInterval >= 0)
   return {
     path: typeof options.path === "string" && options.path.trim().length > 0 ? options.path.trim() : undefined,
     override: options.override === true,
     watch: options.watch !== false,
     pollIntervalMs:
-      typeof options.pollIntervalMs === "number" &&
-      Number.isFinite(options.pollIntervalMs) &&
-      options.pollIntervalMs >= 0
-        ? Math.floor(options.pollIntervalMs)
-        : 5000,
+      typeof rawPollInterval === "number" && Number.isInteger(rawPollInterval) && rawPollInterval >= 0 ? rawPollInterval : 5000,
+    ...(validPollInterval
+      ? {}
+      : { pollIntervalWarning: "invalid pollIntervalMs; expected 0 or a positive integer, using 5000 ms" }),
     mcpReconnect: Array.isArray(options.mcpReconnect)
       ? options.mcpReconnect.filter((name): name is string => typeof name === "string" && name.length > 0)
       : options.mcpReconnect === "all"
@@ -603,6 +608,7 @@ async function registerEnvRefTransform(instance: Instance): Promise<McpRegistrat
  */
 function activate(options: NormalizedOptions, directory: string, mcp?: McpLike): () => void {
   const emit = makeEmit(options)
+  if (options.pollIntervalWarning) emit("warn", options.pollIntervalWarning)
   const file = canonicalFilePath(options.path ? expandPath(options.path, directory) : defaultSecretsPath())
   const instance: Instance = { file, options, mcp, emit, scanRefs: makeRefScanner(directory) }
 

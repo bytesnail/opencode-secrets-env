@@ -30,6 +30,8 @@ const defaultFiles = [
   "test/index.test.ts",
   "test/mcp.test.ts",
   "test/changelog.test.ts",
+  "test/npm-release-audit.test.ts",
+  "test/release-workflow.test.ts",
   "test/e2e/poll.test.ts",
 ]
 const files = process.argv.slice(2)

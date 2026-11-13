@@ -368,6 +368,24 @@ test("server() warns when shared-file instances have conflicting reload options"
   })
 })
 
+test("server() warns when an invalid poll interval falls back to the default", async () => {
+  await withTempDir(async (dir) => {
+    const previousXdg = process.env.XDG_DATA_HOME
+    process.env.XDG_DATA_HOME = join(dir, "data")
+    try {
+      const log = join(dir, "data", "opencode", "log", "opencode-secrets-env.log")
+      const file = join(dir, "secrets.env")
+      writeFileSync(file, `${KEY}=value\n`, { mode: 0o600 })
+      const hooks = await plugin.server({ directory: dir }, { path: file, watch: false, quiet: true, pollIntervalMs: 0.6 })
+      assert.match(readLog(log), /invalid pollIntervalMs; expected 0 or a positive integer, using 5000 ms/)
+      await hooks.dispose()
+    } finally {
+      if (previousXdg === undefined) delete process.env.XDG_DATA_HOME
+      else process.env.XDG_DATA_HOME = previousXdg
+    }
+  })
+})
+
 test("server() dispose is idempotent", async () => {
   await withTempDir(async (dir) => {
     const file = join(dir, "secrets.env")

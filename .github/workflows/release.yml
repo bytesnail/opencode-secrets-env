@@ -1,13 +1,12 @@
 name: Release
 
-# CI-gated publishing: pushing a v<version> tag replays the full CI matrix
-# (unit + real-host e2e, ubuntu + windows + macOS) and only then publishes to
-# npm and
-# creates the GitHub Release. npm authenticates this workflow via trusted
-# publishing (OIDC) — there is deliberately no NPM_TOKEN, so only this
-# workflow can publish and local `npm publish` fails by design.
+# CI-gated staging: pushing a v<version> tag replays the full CI matrix
+# (unit + real-host e2e, ubuntu + windows + macOS), stages the package on npm,
+# and creates the GitHub Release. npm authenticates this workflow via trusted
+# publishing (OIDC); a maintainer must separately approve the staged package
+# with 2FA before it becomes publicly installable.
 #
-# The `npm publish` step must stay directly in THIS file: npm validates the
+# The `npm stage publish` step must stay directly in THIS file: npm validates the
 # calling workflow's filename against the trusted-publisher binding, so a
 # publish hidden behind a reusable workflow (workflow_call) would mismatch.
 # (ci.yml is reused via workflow_call for the test matrix only — that
@@ -74,11 +73,15 @@ jobs:
           # Node 24 bundles npm >= 11.5.1, the trusted-publishing floor.
           node-version: "24"
           registry-url: https://registry.npmjs.org
-      # prepublishOnly (typecheck + unit tests) runs again inside npm publish.
+      # prepublishOnly (typecheck + unit tests) runs again inside npm stage publish.
       # No NODE_AUTH_TOKEN anywhere on purpose: npm only engages the OIDC
       # trusted-publisher exchange when no token is present.
       - run: npm ci
-      - run: npm publish --provenance
+      - run: npm stage publish --provenance
+      - name: Record that maintainer approval is still required
+        run: |
+          echo "opencode-secrets-env@${{ needs.guard.outputs.version }} is staged, not public." >> "$GITHUB_STEP_SUMMARY"
+          echo "A maintainer must inspect and approve the stage with 2FA before npm makes it installable." >> "$GITHUB_STEP_SUMMARY"
       # Release notes = the version's CHANGELOG.md section + its compare
       # link (parsed from the link definitions, so no git history needed).
       - name: Build release notes from CHANGELOG.md
@@ -91,14 +94,3 @@ jobs:
       - run: gh release create "${{ github.ref_name }}" --notes-file notes.md --verify-tag
         env:
           GH_TOKEN: ${{ github.token }}
-      - name: Verify the new version is visible on npm
-        run: |
-          # npm processes publishes asynchronously ("may take a few minutes
-          # to become available") — poll generously before declaring failure.
-          for i in $(seq 1 30); do
-            seen="$(npm view opencode-secrets-env version 2>/dev/null || true)"
-            [ "$seen" = "${{ needs.guard.outputs.version }}" ] && exit 0
-            sleep 20
-          done
-          echo "::error::npm view still does not show ${{ needs.guard.outputs.version }}"
-          exit 1

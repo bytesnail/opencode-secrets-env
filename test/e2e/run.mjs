@@ -252,6 +252,91 @@ async function v2Flow() {
   }
 }
 
+async function v2MultiInstanceFlow() {
+  // Keep inline config out of this measurement: OPENCODE_CONFIG_CONTENT is
+  // service-wide and would add a third, shared MCP server to both locations.
+  delete env.OPENCODE_CONFIG_CONTENT
+  const multiDump = join(workdir, "multi-stub-dump.jsonl")
+  env.STUB_DUMP = multiDump
+  const projectA = join(workdir, "multi-a")
+  const projectB = join(workdir, "multi-b")
+  for (const directory of [projectA, projectB]) mkdirSync(directory, { recursive: true })
+  const writeProject = (directory, name) => {
+    writeFileSync(
+      join(directory, "opencode.jsonc"),
+      JSON.stringify(
+        {
+          mcp: {
+            servers: {
+              [name]: {
+                type: "local",
+                command: [process.execPath, stubPath],
+                environment: { STUB_NAME: name, STUB_SUBSTITUTED: `{env:${SECRET_KEY}}` },
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    )
+  }
+  writeProject(projectA, "stub-a")
+  writeProject(projectB, "stub-b")
+  writeSecrets(VALUE_ONE)
+  await run(bin, ["service", "set", "port", String(port)], { cwd: projectA, env })
+  await run(bin, ["service", "start"], { cwd: projectA, env })
+  const dumpNamed = (name) => readDump(multiDump).filter((record) => record.name === name)
+  try {
+    await run(bin, ["mcp", "list"], { cwd: projectA, env })
+    const bLogOffset = readLines(pluginLog).length
+    await run(bin, ["mcp", "list"], { cwd: projectB, env })
+    await poll("two V2 locations spawn their MCP stubs", () => dumpNamed("stub-a").length >= 1 && dumpNamed("stub-b").length >= 1)
+    const initialACount = dumpNamed("stub-a").length
+    const initialBCount = dumpNamed("stub-b").length
+    const firstA = dumpNamed("stub-a").at(-1)
+    const firstB = dumpNamed("stub-b").at(-1)
+    const logOffset = readLines(pluginLog).length
+
+    writeSecrets(VALUE_TWO)
+    await poll("first V2 location reconnects after the shared-file reload", () => {
+      const reconnects = readLines(pluginLog).slice(logOffset).filter((line) => line.includes("reconnecting MCP server(s)"))
+      return dumpNamed("stub-a").length > initialACount && reconnects.some((line) => line.includes("stub-a"))
+    })
+    // A shared FileState would reconnect B after A's one-second sleep. Allow
+    // that window, then record whether the host actually shares module state.
+    await new Promise((resolve) => setTimeout(resolve, 2500))
+    const secondA = dumpNamed("stub-a").at(-1)
+    check("v2 multi: location A respawned with the new value", secondA.pid !== firstA.pid && secondA.substituted === VALUE_TWO, JSON.stringify(secondA))
+
+    const reconnectLines = readLines(pluginLog).slice(logOffset).filter((line) => line.includes("reconnecting MCP server(s)"))
+    const reconnectA = reconnectLines.find((line) => line.includes("stub-a"))
+    const reconnectB = reconnectLines.find((line) => line.includes("stub-b"))
+    const secondB = dumpNamed("stub-b").length > initialBCount ? dumpNamed("stub-b").at(-1) : undefined
+    const logTime = (line) => Date.parse(line.split(" ", 1)[0])
+    if (secondB && reconnectB) {
+      check("v2 multi: location B respawned with the new value", secondB.pid !== firstB.pid && secondB.substituted === VALUE_TWO, JSON.stringify(secondB))
+      const timing = {
+        reconnectBMinusAMs: logTime(reconnectB) - logTime(reconnectA),
+        respawnBMinusAMs: secondB.at - secondA.at,
+        respawnBMinusReconnectAMs: secondB.at - logTime(reconnectA),
+      }
+      console.log(`v2 multi-instance timing: ${JSON.stringify(timing)}`)
+    } else {
+      const bStartupLogs = readLines(pluginLog).slice(bLogOffset, logOffset)
+      check(
+        "v2 multi: locations use independent plugin module state",
+        bStartupLogs.some((line) => line.includes("startup: up to date")) &&
+          bStartupLogs.some((line) => line.includes("kept from real environment")) &&
+          dumpNamed("stub-b").at(-1).substituted === VALUE_ONE,
+      )
+      console.log("v2 multi-instance measurement: no shared FileState; the serial per-file reconnect tail is not reachable")
+    }
+  } finally {
+    await run(bin, ["service", "stop"], { cwd: projectA, env }).catch(() => {})
+  }
+}
+
 async function v1Flow() {
   const password = "e2e-pw"
   const serveOut = join(workdir, "serve.stdout.log")
@@ -317,8 +402,10 @@ async function v1Flow() {
 }
 
 try {
-  if (host === "v2") await v2Flow()
-  else await v1Flow()
+  if (host === "v2") {
+    await v2Flow()
+    await v2MultiInstanceFlow()
+  } else await v1Flow()
 } catch (cause) {
   failures.push(`uncaught: ${(cause instanceof Error ? cause.message : String(cause))}`)
 }

@@ -1,0 +1,43 @@
+name: npm Release Audit
+
+# Detect registry versions or dist-tags that do not reconcile with approved
+# GitHub Releases. This workflow never runs for untrusted pull requests.
+on:
+  schedule:
+    - cron: "23 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: npm-release-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+      - name: Compare npm registry metadata with GitHub Releases
+        run: node scripts/npm-release-audit.ts
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Open one alert issue when reconciliation fails
+        if: failure() && hashFiles('npm-release-audit.md') != ''
+        run: |
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search 'npm release audit in:title' --json number --jq '.[0].number' || true)"
+          if [ -n "$existing" ]; then
+            echo "Open alert issue already exists: #$existing"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "[npm release audit] Registry/GitHub Release mismatch" \
+              --body-file npm-release-audit.md
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}

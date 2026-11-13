@@ -33,6 +33,17 @@ to stay anonymous.
 Only the latest published release receives security fixes. Please upgrade to
 the newest version before reporting.
 
+## If you installed an unexpected or compromised version
+
+- Stop using the affected package and pin to a known-good version. Check the
+  npm version, dist-tags and provenance before reinstalling.
+- Rotate any secrets that were available to OpenCode or its MCP servers while
+  the affected package was installed. Restoring `latest` or uninstalling the
+  package does not remove copies already installed and does not make exposed
+  secrets safe again.
+- Report the version, installation time and package source privately using the
+  advisory link above. Never include real secret values.
+
 ## Deliberate behavior (not a vulnerability)
 
 These are documented design decisions — still report them if you find they can
@@ -68,6 +79,15 @@ be abused beyond what is documented:
 ## 支持版本
 
 仅最新发布版本获得安全修复，报告前请先升级到最新版本。
+
+## 如果安装了异常或遭篡改的版本
+
+- 立即停用受影响包并固定到已知正常版本；重新安装前核对 npm 版本、
+  dist-tag 与 provenance。
+- 轮换受影响包安装期间 OpenCode 或其 MCP 服务器能够接触到的所有秘密。
+  恢复 `latest` 或卸载包不会清除已经安装的副本，也不能让已泄露的秘密
+  重新安全。
+- 通过上方私密渠道报告版本、安装时间与包来源；绝不要包含真实秘密值。
 
 ## 属于有意设计的行为（不算漏洞）
 
