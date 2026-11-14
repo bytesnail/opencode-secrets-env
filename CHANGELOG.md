@@ -7,6 +7,50 @@ fixes, minor for features.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-14
+
+### Fixed
+
+- Preserve real characters when object-layer MCP templates combine `{env:...}`
+  and `{file:...}` references; unreadable file references now resolve to an
+  empty string, matching the V2.3.0 host behavior. (`def4f89`)
+- Harden hot reload: watcher failures retry with bounded backoff, content-hash
+  polling catches same-metadata rewrites, POSIX chmod-only recovery works, and
+  normalized/symlinked paths share one ownership state. (`def4f89`)
+- Use own-property checks so prototype-named environment keys can be withdrawn
+  correctly, and warn when instances sharing one file have conflicting reload
+  options. (`def4f89`)
+- Invalid `pollIntervalMs` values, including fractions, now fall back to the
+  5000 ms default with a warning instead of being silently floored. (`fb282cc`)
+- Allow additional startup time for the real V1 server on Windows runners. (`e3920bf`)
+
+### Security
+
+- Stage npm releases with provenance for independent maintainer 2FA approval
+  instead of publishing directly from CI. (`fb282cc`)
+- Add daily npm registry/GitHub Release reconciliation, including dist-tag and
+  `latest` checks, a 24-hour approval grace period, and deduplicated alerts. (`fb282cc`)
+- Refresh dependencies to address the undici/zod/ip-address and nested glob
+  advisories covered by the dependency updates. (`f6bb2f1`, `8ba1d9a`)
+
+### Documentation
+
+- Add concise compromised-version response guidance and update the maintainer
+  release/runbook documentation. (`fb282cc`)
+- Record the CodeQL dependabot group, SSH branch refresh, and local e2e HOME
+  sandbox. (`cf8456c`)
+
+### Internal
+
+- Add a real V2 multi-location measurement; the current host uses independent
+  plugin module state across locations. (`fb282cc`)
+- Bump actions/setup-node from 7.0.0 to 7.1.0 (#11) (`4b2b8b1`)
+- Bump github/codeql-action from 4.38.2 to 4.39.1 (#16) (`32e893a`)
+- Bump the CodeQL group with 2 updates (#18) (`964a755`)
+- Pin the V2 host spec to 2.2.6, aligned with the plugin SDK (#20) (`c57b3e9`)
+- Align the V2 SDK and default real-host e2e with 2.3.0, and retain nested
+  glob 10.5.0 so GHSA-5j98-mcp5-4vw2 stays resolved (#26) (`e119a6f`)
+
 ## [0.6.0] - 2026-10-05
 
 ### Added
@@ -115,7 +159,8 @@ First public release.
 - Windows: platform-aware `~\` expansion, npm via `cmd.exe` in the e2e
   harness.
 
-[Unreleased]: https://github.com/bytesnail/opencode-secrets-env/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/bytesnail/opencode-secrets-env/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/bytesnail/opencode-secrets-env/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/bytesnail/opencode-secrets-env/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/bytesnail/opencode-secrets-env/compare/v0.4.5...v0.5.0
 [0.4.5]: https://github.com/bytesnail/opencode-secrets-env/compare/v0.4.4...v0.4.5
