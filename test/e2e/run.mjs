@@ -26,7 +26,7 @@ import { poll, v1SessionEndpointTimeoutMs } from "./poll.ts"
 
 const HOST_SPECS = {
   v1: process.env.OPENCODE_E2E_V1_SPEC ?? "opencode-ai@1.18.34",
-  v2: process.env.OPENCODE_E2E_V2_SPEC ?? "@opencode/cli@2.2.6",
+  v2: process.env.OPENCODE_E2E_V2_SPEC ?? "@opencode/cli@2.3.0",
 }
 
 const SECRET_KEY = "E2E_SECRET"
