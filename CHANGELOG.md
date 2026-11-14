@@ -13,7 +13,7 @@ fixes, minor for features.
 
 - Preserve real characters when object-layer MCP templates combine `{env:...}`
   and `{file:...}` references; unreadable file references now resolve to an
-  empty string, matching the V2.2.6 host behavior. (`def4f89`)
+  empty string, matching the V2.3.0 host behavior. (`def4f89`)
 - Harden hot reload: watcher failures retry with bounded backoff, content-hash
   polling catches same-metadata rewrites, POSIX chmod-only recovery works, and
   normalized/symlinked paths share one ownership state. (`def4f89`)
@@ -48,6 +48,8 @@ fixes, minor for features.
 - Bump github/codeql-action from 4.38.2 to 4.39.1 (#16) (`32e893a`)
 - Bump the CodeQL group with 2 updates (#18) (`964a755`)
 - Pin the V2 host spec to 2.2.6, aligned with the plugin SDK (#20) (`c57b3e9`)
+- Align the V2 SDK and default real-host e2e with 2.3.0, and retain nested
+  glob 10.5.0 so GHSA-5j98-mcp5-4vw2 stays resolved (#26) (`e119a6f`)
 
 ## [0.6.0] - 2026-10-05
 
