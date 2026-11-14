@@ -74,6 +74,8 @@ export function readSecrets(file: string): ReadResult {
 
   let insecurePermissions = false
   try {
+    // Advisory only: the path can be atomically replaced between read and
+    // stat, so this warning is not an authorization or file-integrity check.
     const { mode } = statSync(file)
     if (process.platform !== "win32" && (mode & 0o077) !== 0) insecurePermissions = true
   } catch {

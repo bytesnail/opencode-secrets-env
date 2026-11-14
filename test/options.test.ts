@@ -55,16 +55,20 @@ test("normalizeOptions falls back to defaults on wrongly typed values", () => {
   assert.equal(options.override, false)
   assert.equal(options.watch, true)
   assert.equal(options.pollIntervalMs, 5000)
+  assert.match(options.pollIntervalWarning ?? "", /pollIntervalMs/)
   assert.equal(options.quiet, false)
   assert.equal(options.debug, false)
   assert.deepEqual(options.required, [])
-  // Negative / non-finite intervals also fall back to the default.
-  assert.equal(normalizeOptions({ pollIntervalMs: -1 }).pollIntervalMs, 5000)
-  assert.equal(normalizeOptions({ pollIntervalMs: Number.NaN }).pollIntervalMs, 5000)
-  // Zero is meaningful: it disables the poll net.
-  assert.equal(normalizeOptions({ pollIntervalMs: 0 }).pollIntervalMs, 0)
-  // Fractional intervals are floored.
-  assert.equal(normalizeOptions({ pollIntervalMs: 1500.9 }).pollIntervalMs, 1500)
+  // Negative, non-finite and fractional intervals fall back with a warning.
+  for (const value of [-1, Number.NaN, 0.6, 1.9, 1500.9]) {
+    const normalized = normalizeOptions({ pollIntervalMs: value })
+    assert.equal(normalized.pollIntervalMs, 5000)
+    assert.match(normalized.pollIntervalWarning ?? "", /pollIntervalMs/)
+  }
+  // Zero is meaningful: it disables the poll net without a warning.
+  const disabled = normalizeOptions({ pollIntervalMs: 0 })
+  assert.equal(disabled.pollIntervalMs, 0)
+  assert.equal(disabled.pollIntervalWarning, undefined)
 })
 
 test("normalizeOptions treats an empty path as unset", () => {
