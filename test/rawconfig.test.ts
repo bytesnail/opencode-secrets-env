@@ -142,7 +142,7 @@ test("resolveTemplate returns object-layer file values and empty unreadable refs
     // restores the actual characters. This function writes into an already
     // parsed object, so it must return the real string rather than the escape.
     assert.equal(resolveTemplate({ path: [], template: "{file:multiline.txt}", dir }, {}), 'line "one"\nline two')
-    // V2.2.6 treats a missing/unreadable file like a missing env var: warn and
+    // V2.3.0 treats a missing/unreadable file like a missing env var: warn and
     // substitute empty rather than materializing the literal token.
     assert.equal(resolveTemplate({ path: [], template: "{file:missing.txt}", dir }, {}), "")
   })

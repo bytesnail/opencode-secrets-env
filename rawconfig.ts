@@ -69,7 +69,7 @@ export function resolveTemplate(ref: EnvReference, env: Record<string, string | 
  * Substitute {file:path} tokens for an already-parsed object value: "~/"
  * expands, relative paths resolve against the config file's directory, and
  * file content is trimmed. Missing/unreadable targets become an empty string,
- * matching V2.2.6's warning-and-empty fallback rather than leaking the token.
+ * matching V2.3.0's warning-and-empty fallback rather than leaking the token.
  */
 function substituteFileRefs(text: string, dir: string): string {
   if (!text.includes("{file:")) return text
